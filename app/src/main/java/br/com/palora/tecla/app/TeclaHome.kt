@@ -93,6 +93,7 @@ data class HomeState(
     /** -1 = sem sessão de contexto ligada; senão, quantas trocas ela tem. */
     val sessionCount: Int = -1,
     val sessionTimeout: Int = 30,
+    val sessionName: String = br.com.palora.tecla.core.TeclaSession.DEFAULT_NAME,
 ) {
     val provider get() = Providers.byId(providerId)
     val aiReady get() = baseUrl.isNotBlank() && model.isNotBlank() && (apiKey.isNotBlank() || !provider.needsKey)
@@ -119,6 +120,7 @@ class HomeActions(
     val openKeyboardSettings: () -> Unit = {},
     val setSessionTimeout: (Int) -> Unit = {},
     val toggleSession: () -> Unit = {},
+    val renameSession: (String) -> Unit = {},
 )
 
 @Composable
@@ -621,11 +623,11 @@ private fun SessionCard(state: HomeState, actions: HomeActions) {
                 Text(
                     when {
                         !active -> "Desligada"
-                        state.sessionCount == 0 -> "Ligada, ainda sem trocas"
-                        state.sessionCount == 1 -> "Ligada · 1 troca"
-                        else -> "Ligada · ${state.sessionCount} trocas"
+                        state.sessionCount == 0 -> "${state.sessionName} · sem trocas"
+                        state.sessionCount == 1 -> "${state.sessionName} · 1 troca"
+                        else -> "${state.sessionName} · ${state.sessionCount} trocas"
                     },
-                    style = TeclaType.bodyStrong, color = c.text,
+                    style = TeclaType.bodyStrong, color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
                 Text(
                     if (active) "Os próximos pedidos levam o que já foi falado." else "Cada pedido começa do zero.",
@@ -634,9 +636,27 @@ private fun SessionCard(state: HomeState, actions: HomeActions) {
             }
             PillButton(if (active) "Encerrar" else "Iniciar", primary = !active, onClick = actions.toggleSession)
         }
+        if (active) {
+            FieldLabel("Nome (até ${br.com.palora.tecla.core.TeclaSession.MAX_NAME} caracteres)", top = 16.dp)
+            var name by remember { mutableStateOf(state.sessionName) }
+            TeclaField(
+                value = name,
+                onChange = {
+                    name = it.take(br.com.palora.tecla.core.TeclaSession.MAX_NAME)
+                    actions.renameSession(name)
+                },
+                placeholder = br.com.palora.tecla.core.TeclaSession.DEFAULT_NAME,
+                trailing = {
+                    Text(
+                        "${name.length}/${br.com.palora.tecla.core.TeclaSession.MAX_NAME}",
+                        style = TeclaType.small, color = c.muted, modifier = Modifier.padding(end = 10.dp),
+                    )
+                },
+            )
+        }
         Text(
             "Com a sessão ligada, a IA lembra das últimas trocas, mesmo em outro app: dá para pedir \"responde ele\" " +
-                "ou \"traduz de volta\" sem copiar de novo. Também liga e desliga pelo botão de balões no painel do teclado.",
+                "ou \"traduz de volta\" sem copiar de novo. No painel do teclado, o botão de balões liga a sessão e um toque no selo dela renomeia ou encerra.",
             style = TeclaType.small, color = c.muted, modifier = Modifier.padding(top = 14.dp),
         )
         FieldLabel("Encerrar sozinha depois de", top = 16.dp)

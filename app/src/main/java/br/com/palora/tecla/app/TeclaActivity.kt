@@ -89,6 +89,7 @@ class TeclaActivity : ComponentActivity() {
             version = BuildConfig.VERSION_NAME,
             sessionCount = sessionCount(),
             sessionTimeout = settings.sessionTimeout,
+            sessionName = session.name(),
         )
     }
 
@@ -104,6 +105,7 @@ class TeclaActivity : ComponentActivity() {
                 imeCurrent = UncachedInputMethodManagerUtils.isThisImeCurrent(this, imm),
                 historyCount = history.all().size,
                 sessionCount = sessionCount(),
+                sessionName = session.name(),
             )
         }
     }
@@ -193,7 +195,12 @@ class TeclaActivity : ComponentActivity() {
         },
         toggleSession = {
             if (session.isActive()) session.end() else session.start()
-            update { it.copy(sessionCount = sessionCount()) }
+            update { it.copy(sessionCount = sessionCount(), sessionName = session.name()) }
+        },
+        renameSession = { name ->
+            // Salva já limpo (espaços, limite), mas deixa o campo como a pessoa digitou enquanto edita.
+            session.rename(name)
+            update { it.copy(sessionName = TeclaSession.cleanName(name)) }
         },
     )
 

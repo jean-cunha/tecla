@@ -26,14 +26,17 @@ data class Exchange(val time: Long, val label: String, val user: String, val ans
 class TeclaSession(context: Context, private val timeoutMinutes: () -> Int) {
     private val file = File(context.applicationContext.filesDir, "tecla_session.json")
 
-    private data class State(val active: Boolean, val lastUse: Long, val exchanges: List<Exchange>)
+    private data class State(val active: Boolean, val lastUse: Long, val exchanges: List<Exchange>, val name: String = DEFAULT_NAME)
 
     @Synchronized
     private fun read(): State = try {
         if (!file.exists()) State(false, 0, emptyList()) else {
             val o = JSONObject(file.readText())
             val arr = o.optJSONArray("x") ?: JSONArray()
-            State(o.optBoolean("on"), o.optLong("last"), List(arr.length()) { Exchange.fromJson(arr.getJSONObject(it)) })
+            State(
+                o.optBoolean("on"), o.optLong("last"), List(arr.length()) { Exchange.fromJson(arr.getJSONObject(it)) },
+                o.optString("n").ifBlank { DEFAULT_NAME },
+            )
         }
     } catch (e: Exception) {
         State(false, 0, emptyList())
@@ -43,7 +46,7 @@ class TeclaSession(context: Context, private val timeoutMinutes: () -> Int) {
     private fun write(s: State) {
         val arr = JSONArray()
         s.exchanges.forEach { arr.put(it.toJson()) }
-        file.writeText(JSONObject().put("on", s.active).put("last", s.lastUse).put("x", arr).toString())
+        file.writeText(JSONObject().put("on", s.active).put("last", s.lastUse).put("x", arr).put("n", s.name).toString())
     }
 
     /** Ligada e ainda dentro do prazo. Uma sessão vencida é encerrada aqui mesmo. */
@@ -67,6 +70,17 @@ class TeclaSession(context: Context, private val timeoutMinutes: () -> Int) {
     fun start(now: Long = System.currentTimeMillis()) = write(State(true, now, emptyList()))
 
     @Synchronized
+    fun name(): String = if (isActive()) read().name else DEFAULT_NAME
+
+    /** Muda o nome da sessão ligada (vazio volta ao padrão). Não conta como uso: não adia o fim automático. */
+    @Synchronized
+    fun rename(name: String) {
+        val s = read()
+        if (!s.active) return
+        write(s.copy(name = cleanName(name)))
+    }
+
+    @Synchronized
     fun end() {
         file.delete()
     }
@@ -81,7 +95,7 @@ class TeclaSession(context: Context, private val timeoutMinutes: () -> Int) {
     fun add(e: Exchange, now: Long = System.currentTimeMillis()) {
         val s = read()
         if (!s.active) return
-        write(State(true, now, (s.exchanges + e).takeLast(MAX_STORED)))
+        write(s.copy(lastUse = now, exchanges = (s.exchanges + e).takeLast(MAX_STORED)))
     }
 
     /** "Gerar de novo" e os ajustes trocam a resposta da última troca, em vez de criar outra. */
@@ -91,11 +105,17 @@ class TeclaSession(context: Context, private val timeoutMinutes: () -> Int) {
         if (!s.active || s.exchanges.isEmpty()) return
         val list = s.exchanges.toMutableList()
         list[list.lastIndex] = list.last().copy(answer = answer)
-        write(State(true, now, list))
+        write(s.copy(lastUse = now, exchanges = list))
     }
 
     companion object {
         const val MAX_STORED = 20
+        const val DEFAULT_NAME = "Sessão"
+
+        /** Limite do nome: é o que cabe no selo do topo do painel. */
+        const val MAX_NAME = 16
+
+        fun cleanName(raw: String): String = raw.replace(Regex("\\s+"), " ").trim().take(MAX_NAME).ifBlank { DEFAULT_NAME }
 
         /** Texto de apoio guardado em cada troca (o pedido atual vai inteiro; o passado, resumido). */
         const val MAX_SOURCE_IN_HISTORY = 3000

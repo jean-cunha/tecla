@@ -108,7 +108,7 @@ class TeclaScreenshotTest {
 
     @Test
     fun painel_sessao_compor() = panel("painel-sessao-compor") {
-        it.showPreview(PanelPalette.DARK, Source.NONE, prompt = "e agora responde ele dizendo que topo", sessionCount = 3)
+        it.showPreview(PanelPalette.DARK, Source.NONE, prompt = "e agora responde ele dizendo que topo", sessionCount = 3, sessionName = "Grupo da obra")
     }
 
     @Test
@@ -117,6 +117,11 @@ class TeclaScreenshotTest {
             PanelPalette.DARK, Source.NONE, result = "Topo sim! Que horas e onde a gente se encontra?",
             label = "e agora responde ele dizendo que topo", icon = "spark", sessionCount = 4, usedContext = true,
         )
+    }
+
+    @Test
+    fun painel_sessao_cartao() = panel("painel-sessao-cartao") {
+        it.showPreview(PanelPalette.DARK, Source.NONE, prompt = "Viagem Chile", sessionCount = 5, sessionName = "Viagem Chile", sessionCard = true)
     }
 
     @Test

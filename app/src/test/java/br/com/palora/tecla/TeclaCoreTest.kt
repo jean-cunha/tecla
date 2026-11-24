@@ -98,4 +98,11 @@ class TeclaCoreTest {
         assertTrue(guardado.length < 3300)
         assertTrue(guardado.contains("[…]"))
     }
+
+    @Test
+    fun nomeDaSessaoLimpoECurto() {
+        assertEquals("Viagem Chile", TeclaSession.cleanName("  Viagem   Chile "))
+        assertEquals(TeclaSession.MAX_NAME, TeclaSession.cleanName("um nome comprido demais para o selo").length)
+        assertEquals(TeclaSession.DEFAULT_NAME, TeclaSession.cleanName("   "))
+    }
 }
