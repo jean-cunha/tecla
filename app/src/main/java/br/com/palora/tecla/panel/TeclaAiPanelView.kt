@@ -134,6 +134,9 @@ class TeclaAiPanelView @JvmOverloads constructor(
 
     init {
         orientation = VERTICAL
+        // As fileiras de chips usam margem negativa para ir até a borda da tela.
+        clipToPadding = false
+        clipChildren = false
         field.apply {
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 15.5f)
             maxLines = 3
@@ -704,6 +707,8 @@ class TeclaAiPanelView @JvmOverloads constructor(
         val scroll = BoundedScrollView(context, maxResultHeight()).apply {
             isVerticalScrollBarEnabled = false
             overScrollMode = OVER_SCROLL_NEVER
+            isVerticalFadingEdgeEnabled = true
+            setFadingEdgeLength(dp(18))
             layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) }
         }
         val body = text(resultText, 15.5f, palette.text).apply {
@@ -745,7 +750,8 @@ class TeclaAiPanelView @JvmOverloads constructor(
             }
             card.addView(buttons)
         }
-        post { resultScroll?.fullScroll(View.FOCUS_DOWN) }
+        // Gerando: acompanha o fim do texto. Pronto: mostra desde o começo.
+        if (running) post { resultScroll?.fullScroll(View.FOCUS_DOWN) } else post { resultScroll?.scrollTo(0, 0) }
         return card
     }
 
