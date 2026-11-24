@@ -198,7 +198,8 @@ class CaretField(context: Context) : TextView(context) {
         val pos = caret.coerceIn(0, text.length)
         val line = l.getLineForOffset(pos)
         val x = if (text.isEmpty()) 0f else l.getPrimaryHorizontal(pos)
-        val left = totalPaddingLeft + x
+        // Campo vazio: o cursor fica no recuo, antes da dica, e não por cima da primeira letra.
+        val left = totalPaddingLeft + x - (if (text.isEmpty()) caretWidth * 2.5f else 0f)
         // Com o campo vazio, o cursor fica na altura da dica (que o TextView desenha como texto).
         val top = totalPaddingTop + l.getLineTop(line) + lineHeight * 0.12f
         val bottom = totalPaddingTop + l.getLineBottom(line) - lineHeight * 0.12f

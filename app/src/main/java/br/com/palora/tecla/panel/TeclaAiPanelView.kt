@@ -141,6 +141,8 @@ class TeclaAiPanelView @JvmOverloads constructor(
             includeFontPadding = false
             setLineSpacing(dp(2).toFloat(), 1f)
             gravity = Gravity.CENTER_VERTICAL or Gravity.START
+            // Recuo para o cursor caber antes da dica quando o campo está vazio.
+            setPadding(dp(6), 0, 0, 0)
         }
     }
 
@@ -827,7 +829,7 @@ class TeclaAiPanelView @JvmOverloads constructor(
         val box = FrameLayout(context).apply {
             background = round(palette.surface, 22f)
             minimumHeight = dp(46)
-            setPadding(dp(16), dp(11), dp(12), dp(11))
+            setPadding(dp(10), dp(11), dp(12), dp(11))
             layoutParams = LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f)
         }
         box.addView(field, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER_VERTICAL))
@@ -865,11 +867,18 @@ class TeclaAiPanelView @JvmOverloads constructor(
     private data class Chip(val label: String, val icon: String?, val onClick: () -> Unit)
 
     private fun chipsRow(chips: List<Chip>): View {
+        // A fileira vai de borda a borda da tela (margem negativa) e o recuo fica dentro da rolagem,
+        // para o último chip sumir na borda do celular e não cortado no meio do painel.
         val scroll = HorizontalScrollView(context).apply {
             isHorizontalScrollBarEnabled = false
             overScrollMode = OVER_SCROLL_NEVER
             clipToPadding = false
-            layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) }
+            setPadding(dp(10), 0, dp(10), 0)
+            layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
+                topMargin = dp(8)
+                marginStart = -dp(10)
+                marginEnd = -dp(10)
+            }
         }
         val row = LinearLayout(context).apply { orientation = HORIZONTAL }
         chips.forEachIndexed { i, c ->
@@ -1029,7 +1038,7 @@ class TeclaAiPanelView @JvmOverloads constructor(
         return if (n == 1) "1 caractere" else "$shown caracteres"
     }
 
-    private fun maxResultHeight(): Int = min(dp(168), (resources.displayMetrics.heightPixels * 0.22f).toInt())
+    private fun maxResultHeight(): Int = min(dp(150), (resources.displayMetrics.heightPixels * 0.19f).toInt())
 
     private fun maxHistoryHeight(): Int = min(dp(300), (resources.displayMetrics.heightPixels * 0.34f).toInt())
 
