@@ -38,6 +38,7 @@ import androidx.annotation.DrawableRes
 import androidx.core.graphics.ColorUtils
 import br.com.palora.tecla.core.ChatClient
 import br.com.palora.tecla.core.ChatEvent
+import br.com.palora.tecla.core.Exchange
 import br.com.palora.tecla.core.HistoryEntry
 import br.com.palora.tecla.core.Prompts
 import br.com.palora.tecla.core.Source
@@ -45,6 +46,7 @@ import br.com.palora.tecla.core.SourceKind
 import br.com.palora.tecla.core.TeclaAction
 import br.com.palora.tecla.core.TeclaException
 import br.com.palora.tecla.core.TeclaHistory
+import br.com.palora.tecla.core.TeclaSession
 import br.com.palora.tecla.core.TeclaSettings
 import br.com.palora.tecla.core.Turn
 import helium314.keyboard.keyboard.internal.keyboard_parser.floris.KeyCode
@@ -89,6 +91,7 @@ class TeclaAiPanelView @JvmOverloads constructor(
 
     private val settings by lazy { TeclaSettings(context) }
     private val historyStore by lazy { TeclaHistory(context) }
+    private val session by lazy { TeclaSession(context) { settings.sessionTimeout } }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var job: Job? = null
 
@@ -116,6 +119,12 @@ class TeclaAiPanelView @JvmOverloads constructor(
     private var runSession = -1L
     private var runModel = ""
     private var fromHistory = false
+
+    // Sessão de contexto: as trocas anteriores que vão junto neste pedido (fotografadas no início,
+    // para "Gerar de novo" e os ajustes não mandarem a própria troca como contexto).
+    private var sessionHistory: List<Exchange> = emptyList()
+    private var exchangeRecorded = false
+    private var previewSession: Int? = null
 
     // Arrastar da tecla apagar
     private var deleteDragStart = -1
@@ -190,10 +199,14 @@ class TeclaAiPanelView @JvmOverloads constructor(
         error: String? = null,
         history: Boolean = false,
         notReady: Boolean = false,
+        sessionCount: Int? = null,
+        usedContext: Boolean = false,
     ) {
         this.palette = palette
         isOpen = true
         previewNotReady = notReady
+        previewSession = sessionCount
+        sessionHistory = if (usedContext) listOf(Exchange(0, "", "", "")) else emptyList()
         sources = listOf(source, Source.NONE).distinctBy { it.kind }
         this.source = source
         field.setValue(prompt)
@@ -227,6 +240,8 @@ class TeclaAiPanelView @JvmOverloads constructor(
         fromHistory = false
         runLabel = ""
         runInstruction = ""
+        sessionHistory = emptyList()
+        exchangeRecorded = false
     }
 
     // ---------------------------------------------------------------- origem do texto
@@ -359,6 +374,8 @@ class TeclaAiPanelView @JvmOverloads constructor(
         runIcon = icon
         runInstruction = instruction
         fromHistory = false
+        exchangeRecorded = false
+        sessionHistory = if (session.isActive()) TeclaSession.fit(session.exchanges()) else emptyList()
         request()
     }
 
@@ -383,7 +400,7 @@ class TeclaAiPanelView @JvmOverloads constructor(
 
         val cfg = settings.snapshot()
         runModel = cfg.model
-        val messages = Prompts.build(settings.personal, runInstruction, source, turns)
+        val messages = Prompts.build(settings.personal, runInstruction, source, turns, sessionHistory)
         val buffer = StringBuilder()
         job = scope.launch {
             try {
@@ -407,6 +424,7 @@ class TeclaAiPanelView @JvmOverloads constructor(
                     error = TeclaException("A IA não devolveu texto. Tente de novo ou escolha outro modelo.")
                 } else {
                     saveHistory()
+                    recordExchange()
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -445,6 +463,37 @@ class TeclaAiPanelView @JvmOverloads constructor(
     private fun stopJob() {
         job?.cancel()
         job = null
+    }
+
+    /** Guarda a troca na sessão (se houver uma ligada). Ajustes e "Gerar de novo" só trocam a resposta. */
+    private fun recordExchange() {
+        if (fromHistory || previewSession != null) return
+        runCatching {
+            if (!session.isActive()) return
+            if (!exchangeRecorded) {
+                session.add(Exchange(System.currentTimeMillis(), runLabel, Prompts.userForHistory(runInstruction, source), resultText))
+                exchangeRecorded = true
+            } else {
+                session.replaceLastAnswer(resultText)
+            }
+        }
+    }
+
+    /** -1 = sem sessão; senão, quantas trocas ela já tem. */
+    private fun sessionCount(): Int = previewSession ?: runCatching { if (session.isActive()) session.count() else -1 }.getOrDefault(-1)
+
+    private fun toggleSession() {
+        if (previewSession != null) return
+        if (session.isActive()) {
+            session.end()
+            sessionHistory = emptyList()
+            toast("Sessão encerrada. Os próximos pedidos começam do zero.")
+        } else {
+            session.start()
+            toast("Sessão iniciada: os próximos pedidos lembram do que já foi falado.")
+        }
+        performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+        render()
     }
 
     private fun saveHistory() {
@@ -586,10 +635,18 @@ class TeclaAiPanelView @JvmOverloads constructor(
             return row
         }
         val model = if (previewNotReady != null) runModel.ifBlank { "gpt-6-luna" } else settings.model
+        val count = if (ready) sessionCount() else -1
         if (ready && model.isNotBlank()) {
-            row.addView(pill(model, palette.accentSoft, palette.onAccentSoft, maxWidthDp = 150) { host?.openApp() }.apply {
+            row.addView(pill(model, palette.surface, palette.muted, maxWidthDp = if (count >= 0) 104 else 140) { host?.openApp() }.apply {
                 contentDescription = "Modelo: $model. Toque para abrir as configurações"
             })
+        }
+        if (ready) {
+            if (count >= 0) {
+                row.addView(sessionPill(count))
+            } else {
+                row.addView(iconButton(R.drawable.tecla_ic_session, "Iniciar sessão de contexto", palette.icon) { toggleSession() })
+            }
         }
         row.addView(iconButton(R.drawable.tecla_ic_history, "Histórico", palette.icon) {
             stopJob()
@@ -598,6 +655,23 @@ class TeclaAiPanelView @JvmOverloads constructor(
             render()
         })
         return row
+    }
+
+    /** Selo da sessão ligada: ponto, "Sessão" e o número de trocas. Toque encerra. */
+    private fun sessionPill(count: Int): View = LinearLayout(context).apply {
+        orientation = HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        setPadding(dp(9), 0, dp(10), 0)
+        background = rippled(round(palette.accentSoft, 13f), 13f)
+        layoutParams = LayoutParams(LayoutParams.WRAP_CONTENT, dp(26)).apply { marginStart = dp(4); marginEnd = dp(2) }
+        contentDescription = "Sessão de contexto ligada, $count trocas. Toque para encerrar"
+        setOnClickListener { toggleSession() }
+        addView(View(context).apply {
+            background = round(palette.accent, 4f)
+            layoutParams = LayoutParams(dp(7), dp(7)).apply { marginEnd = dp(6) }
+        })
+        addView(text("Sessão", 12f, palette.onAccentSoft, bold = true))
+        if (count > 0) addView(text(" $count", 12f, palette.onAccentSoft))
     }
 
     private fun setupCard(): View {
@@ -829,6 +903,7 @@ class TeclaAiPanelView @JvmOverloads constructor(
         (field.parent as? ViewGroup)?.removeView(field)
         field.hint = when {
             mode == Mode.RESULT && error == null && resultText.isNotBlank() -> "Ajustar: “mais curto”, “sem emoji”…"
+            source.kind == SourceKind.NONE && sessionCount() > 0 -> "Continue a conversa…"
             source.kind == SourceKind.NONE -> "Pergunte ou peça qualquer coisa…"
             else -> "Diga o que fazer com o texto…"
         }
@@ -927,6 +1002,7 @@ class TeclaAiPanelView @JvmOverloads constructor(
         running -> "gerando…"
         fromHistory -> runModel
         stopped -> "interrompido"
+        sessionHistory.isNotEmpty() -> "com contexto · " + "%.1f s".format(elapsedMs / 1000.0).replace('.', ',')
         else -> "%.1f s".format(elapsedMs / 1000.0).replace('.', ',')
     }
 

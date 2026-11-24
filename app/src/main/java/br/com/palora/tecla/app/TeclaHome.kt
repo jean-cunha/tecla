@@ -90,6 +90,9 @@ data class HomeState(
     val historyCount: Int,
     val preferClipboard: Boolean,
     val version: String,
+    /** -1 = sem sessão de contexto ligada; senão, quantas trocas ela tem. */
+    val sessionCount: Int = -1,
+    val sessionTimeout: Int = 30,
 ) {
     val provider get() = Providers.byId(providerId)
     val aiReady get() = baseUrl.isNotBlank() && model.isNotBlank() && (apiKey.isNotBlank() || !provider.needsKey)
@@ -114,6 +117,8 @@ class HomeActions(
     val clearHistory: () -> Unit = {},
     val setPreferClipboard: (Boolean) -> Unit = {},
     val openKeyboardSettings: () -> Unit = {},
+    val setSessionTimeout: (Int) -> Unit = {},
+    val toggleSession: () -> Unit = {},
 )
 
 @Composable
@@ -137,6 +142,9 @@ fun TeclaHome(state: HomeState, actions: HomeActions, initialModelPicker: Boolea
 
             SectionTitle("Inteligência artificial")
             AiCard(state, actions, openModels = { showModels = true; if (state.models.isEmpty()) actions.loadModels() })
+
+            SectionTitle("Sessão de contexto")
+            SessionCard(state, actions)
 
             SectionTitle("Ações rápidas")
             ActionsCard(state.actions, onEdit = { editing = it }, onAdd = { editing = -1 }, onMove = { from, to ->
@@ -599,6 +607,58 @@ private fun ActionEditor(initial: TeclaAction?, onDismiss: () -> Unit, onSave: (
 }
 
 // ------------------------------------------------------------------------- outras seções
+
+@Composable
+private fun SessionCard(state: HomeState, actions: HomeActions) {
+    val c = LocalTecla.current
+    val active = state.sessionCount >= 0
+    Card {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(40.dp).clip(CircleShape).background(if (active) c.accentSoft else c.surfaceHigh), contentAlignment = Alignment.Center) {
+                Icon(painterResource(R.drawable.tecla_ic_session), null, tint = if (active) c.onAccentSoft else c.muted, modifier = Modifier.size(20.dp))
+            }
+            Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                Text(
+                    when {
+                        !active -> "Desligada"
+                        state.sessionCount == 0 -> "Ligada, ainda sem trocas"
+                        state.sessionCount == 1 -> "Ligada · 1 troca"
+                        else -> "Ligada · ${state.sessionCount} trocas"
+                    },
+                    style = TeclaType.bodyStrong, color = c.text,
+                )
+                Text(
+                    if (active) "Os próximos pedidos levam o que já foi falado." else "Cada pedido começa do zero.",
+                    style = TeclaType.small, color = c.muted,
+                )
+            }
+            PillButton(if (active) "Encerrar" else "Iniciar", primary = !active, onClick = actions.toggleSession)
+        }
+        Text(
+            "Com a sessão ligada, a IA lembra das últimas trocas, mesmo em outro app: dá para pedir \"responde ele\" " +
+                "ou \"traduz de volta\" sem copiar de novo. Também liga e desliga pelo botão de balões no painel do teclado.",
+            style = TeclaType.small, color = c.muted, modifier = Modifier.padding(top = 14.dp),
+        )
+        FieldLabel("Encerrar sozinha depois de", top = 16.dp)
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            br.com.palora.tecla.core.TeclaSession.timeoutOptions.forEach { (minutes, label) ->
+                val selected = minutes == state.sessionTimeout
+                Text(
+                    label, style = TeclaType.label,
+                    color = if (selected) c.onAccentSoft else c.muted,
+                    modifier = Modifier.clip(CircleShape)
+                        .background(if (selected) c.accentSoft else c.surfaceHigh)
+                        .clickable { actions.setSessionTimeout(minutes) }
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                )
+            }
+        }
+        Text(
+            "Vão junto as trocas mais recentes, até cerca de 16 mil caracteres. Quanto maior a sessão, mais tokens por pedido.",
+            style = TeclaType.small, color = c.muted, modifier = Modifier.padding(top = 10.dp),
+        )
+    }
+}
 
 @Composable
 private fun PersonalCard(value: String, onChange: (String) -> Unit) {

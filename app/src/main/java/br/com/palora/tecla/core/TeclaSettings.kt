@@ -118,6 +118,11 @@ class TeclaSettings(context: Context) {
         get() = prefs.getBoolean(K_PREFER_CLIP, true)
         set(v) = prefs.edit().putBoolean(K_PREFER_CLIP, v).apply()
 
+    /** Minutos sem uso até a sessão de contexto terminar sozinha (0 = não termina). */
+    var sessionTimeout: Int
+        get() = prefs.getInt(K_SESSION_TIMEOUT, 30)
+        set(v) = prefs.edit().putInt(K_SESSION_TIMEOUT, v).apply()
+
     var apiKey: String
         get() = prefs.getString(k(K_API_KEY), null)?.let { KeyVault.decrypt(it) } ?: ""
         set(v) {
@@ -182,6 +187,7 @@ class TeclaSettings(context: Context) {
         private const val K_API_KEY = "api_key_enc"
         private const val K_ACTIONS = "actions_v1"
         private const val K_MODELS = "models"
+        private const val K_SESSION_TIMEOUT = "session_timeout_min"
     }
 }
 

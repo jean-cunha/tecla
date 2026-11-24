@@ -54,16 +54,38 @@ object Prompts {
         return "Pedido: ${instruction.trim()}\n\nO $where está entre <<< e >>>:\n<<<\n$text\n>>>"
     }
 
-    fun build(personal: String, instruction: String, source: Source, turns: List<Turn>): List<ChatMessage> {
-        val list = mutableListOf(
-            ChatMessage("system", system(personal)),
-            ChatMessage("user", firstUser(instruction, source)),
-        )
+    fun build(
+        personal: String,
+        instruction: String,
+        source: Source,
+        turns: List<Turn>,
+        history: List<Exchange> = emptyList(),
+    ): List<ChatMessage> {
+        val sys = if (history.isEmpty()) system(personal) else system(personal) + SESSION_NOTE
+        val list = mutableListOf(ChatMessage("system", sys))
+        history.forEach {
+            list += ChatMessage("user", it.user)
+            list += ChatMessage("assistant", it.answer)
+        }
+        list += ChatMessage("user", firstUser(instruction, source))
         turns.forEach {
             list += ChatMessage("assistant", it.answer)
             list += ChatMessage("user", "Ajuste a sua última resposta: ${it.followUp.trim()}\nResponda de novo só com o texto final.")
         }
         return list
+    }
+
+    private const val SESSION_NOTE =
+        "\n\nEsta conversa é uma sessão: as mensagens anteriores são pedidos e respostas desta mesma pessoa, " +
+            "feitos agora há pouco, talvez em outros aplicativos. Use esse contexto quando o pedido atual depender dele " +
+            "(\"responde ele\", \"traduz de volta\", \"o mesmo de antes\"), e ignore quando não tiver relação."
+
+    /** Versão curta do pedido para guardar na sessão: o texto de apoio antigo não precisa ir inteiro. */
+    fun userForHistory(instruction: String, source: Source): String {
+        val shortSource = if (source.text.length > TeclaSession.MAX_SOURCE_IN_HISTORY) {
+            source.copy(text = source.text.take(TeclaSession.MAX_SOURCE_IN_HISTORY) + " […]")
+        } else source
+        return firstUser(instruction, shortSource)
     }
 
     /** Limpa o que alguns modelos insistem em mandar: aspas em volta e cercas de código. */

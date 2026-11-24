@@ -24,6 +24,7 @@ import br.com.palora.tecla.core.ChatMessage
 import br.com.palora.tecla.core.Providers
 import br.com.palora.tecla.core.TeclaException
 import br.com.palora.tecla.core.TeclaHistory
+import br.com.palora.tecla.core.TeclaSession
 import br.com.palora.tecla.core.TeclaSettings
 import helium314.keyboard.latin.BuildConfig
 import helium314.keyboard.latin.utils.UncachedInputMethodManagerUtils
@@ -37,6 +38,7 @@ import kotlinx.coroutines.withContext
 class TeclaActivity : ComponentActivity() {
     private lateinit var settings: TeclaSettings
     private lateinit var history: TeclaHistory
+    private lateinit var session: TeclaSession
     private var state by mutableStateOf<HomeState?>(null)
     private var modelsJob: Job? = null
     private var testJob: Job? = null
@@ -46,6 +48,7 @@ class TeclaActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         settings = TeclaSettings(this)
         history = TeclaHistory(this)
+        session = TeclaSession(this) { settings.sessionTimeout }
         state = load()
         val view = ComposeView(this)
         setContentView(view)
@@ -84,6 +87,8 @@ class TeclaActivity : ComponentActivity() {
             historyCount = history.all().size,
             preferClipboard = settings.preferClipboard,
             version = BuildConfig.VERSION_NAME,
+            sessionCount = sessionCount(),
+            sessionTimeout = settings.sessionTimeout,
         )
     }
 
@@ -98,9 +103,12 @@ class TeclaActivity : ComponentActivity() {
                 imeEnabled = UncachedInputMethodManagerUtils.isThisImeEnabled(this, imm),
                 imeCurrent = UncachedInputMethodManagerUtils.isThisImeCurrent(this, imm),
                 historyCount = history.all().size,
+                sessionCount = sessionCount(),
             )
         }
     }
+
+    private fun sessionCount(): Int = if (session.isActive()) session.count() else -1
 
     private fun reloadProvider() {
         modelsJob?.cancel()
@@ -178,6 +186,14 @@ class TeclaActivity : ComponentActivity() {
         },
         openKeyboardSettings = {
             startActivity(Intent(this, SettingsActivity::class.java))
+        },
+        setSessionTimeout = { minutes ->
+            settings.sessionTimeout = minutes
+            update { it.copy(sessionTimeout = minutes, sessionCount = sessionCount()) }
+        },
+        toggleSession = {
+            if (session.isActive()) session.end() else session.start()
+            update { it.copy(sessionCount = sessionCount()) }
         },
     )
 

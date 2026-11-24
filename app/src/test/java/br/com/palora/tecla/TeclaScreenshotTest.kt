@@ -107,6 +107,19 @@ class TeclaScreenshotTest {
     }
 
     @Test
+    fun painel_sessao_compor() = panel("painel-sessao-compor") {
+        it.showPreview(PanelPalette.DARK, Source.NONE, prompt = "e agora responde ele dizendo que topo", sessionCount = 3)
+    }
+
+    @Test
+    fun painel_sessao_resposta() = panel("painel-sessao-resposta") {
+        it.showPreview(
+            PanelPalette.DARK, Source.NONE, result = "Topo sim! Que horas e onde a gente se encontra?",
+            label = "e agora responde ele dizendo que topo", icon = "spark", sessionCount = 4, usedContext = true,
+        )
+    }
+
+    @Test
     fun painel_sem_configurar() = panel("painel-sem-configurar") {
         it.showPreview(PanelPalette.DARK, Source.NONE, notReady = true)
     }
@@ -154,6 +167,7 @@ class TeclaScreenshotTest {
         historyCount = if (ready) 12 else 0,
         preferClipboard = true,
         version = "1.0.0",
+        sessionCount = if (ready) 3 else -1,
     )
 
     @Test
