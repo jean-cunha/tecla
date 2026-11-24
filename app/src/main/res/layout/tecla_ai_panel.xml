@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tecla: painel de IA. O conteúdo é montado em código (TeclaAiPanelView). SPDX-License-Identifier: GPL-3.0-only -->
+<br.com.palora.tecla.panel.TeclaAiPanelView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/tecla_ai_panel"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:visibility="gone" />

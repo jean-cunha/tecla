@@ -306,6 +306,7 @@ fun getCodeForToolbarKey(key: ToolbarKey) = Settings.getInstance().getCustomTool
     OCR -> KeyCode.OCR
     SELECT_MODE -> KeyCode.TOGGLE_SELECTION_MODE
     GIF -> KeyCode.GIF
+    TECLA_AI -> KeyCode.TECLA_AI
     FONT_STYLE -> KeyCode.FONT_STYLE
     CUSTOM_AI_1 -> KeyCode.CUSTOM_AI_1
     CUSTOM_AI_2 -> KeyCode.CUSTOM_AI_2
@@ -347,7 +348,8 @@ enum class ToolbarKey {
     INCOGNITO, TOUCHPAD, TEXT_EDIT, AUTOCORRECT, AUTO_CAP, FORCE_AUTO_CAPS, CLEAR_CLIPBOARD, CLOSE_HISTORY, EMOJI, LEFT, RIGHT, UP, DOWN, WORD_LEFT, WORD_RIGHT,
     PAGE_UP, PAGE_DOWN, FULL_LEFT, FULL_RIGHT, PAGE_START, PAGE_END, PROOFREAD, TRANSLATE, OCR, SELECT_MODE, GIF, FONT_STYLE,
     CUSTOM_AI_1, CUSTOM_AI_2, CUSTOM_AI_3, CUSTOM_AI_4, CUSTOM_AI_5,
-    CUSTOM_AI_6, CUSTOM_AI_7, CUSTOM_AI_8, CUSTOM_AI_9, CUSTOM_AI_10
+    CUSTOM_AI_6, CUSTOM_AI_7, CUSTOM_AI_8, CUSTOM_AI_9, CUSTOM_AI_10,
+    TECLA_AI
 }
 
 enum class ToolbarMode {
@@ -383,8 +385,9 @@ private val excludedKeys by lazy {
 
 val defaultToolbarPref by lazy {
     val default = when (helium314.keyboard.latin.BuildConfig.FLAVOR) {
-        "offline" -> listOf(SETTINGS, VOICE, CLIPBOARD, HANDWRITING, OCR, GIF, CUSTOM_AI_1, CUSTOM_AI_2, CUSTOM_AI_3, UNDO, INCOGNITO, COPY, PASTE, PROOFREAD, TRANSLATE, TEXT_EDIT, AUTOCORRECT)
-        else -> listOf(SETTINGS, VOICE, CLIPBOARD, HANDWRITING, OCR, GIF, CUSTOM_AI_1, CUSTOM_AI_2, CUSTOM_AI_3, UNDO, PROOFREAD, TRANSLATE, INCOGNITO, TOUCHPAD, TEXT_EDIT, AUTOCORRECT, FLOATING, NUMPAD, COPY, PASTE, SELECT_ALL, SELECT_MODE)
+        "offline" -> listOf(TECLA_AI, SETTINGS, VOICE, CLIPBOARD, HANDWRITING, OCR, GIF, CUSTOM_AI_1, CUSTOM_AI_2, CUSTOM_AI_3, UNDO, INCOGNITO, COPY, PASTE, PROOFREAD, TRANSLATE, TEXT_EDIT, AUTOCORRECT)
+        // Tecla: o botão de IA vem primeiro; as teclas de IA próprias do LeanType ficam desligadas por padrão.
+        else -> listOf(TECLA_AI, SETTINGS, VOICE, CLIPBOARD, UNDO, INCOGNITO, TOUCHPAD, TEXT_EDIT, AUTOCORRECT, FLOATING, NUMPAD, COPY, PASTE, SELECT_ALL, SELECT_MODE, GIF, OCR, HANDWRITING)
     }
         
     val others = entries.filterNot { it in default || it in excludedKeys }
@@ -393,7 +396,7 @@ val defaultToolbarPref by lazy {
 }
 
 val defaultPinnedToolbarPref by lazy {
-    val pinnedDefault = listOf(CLIPBOARD, PROOFREAD, TOUCHPAD, TEXT_EDIT, FLOATING)
+    val pinnedDefault = listOf(TECLA_AI, CLIPBOARD)
 
     entries.filterNot { it in excludedKeys }.joinToString(Separators.ENTRY) {
         it.name + Separators.KV + (it in pinnedDefault)

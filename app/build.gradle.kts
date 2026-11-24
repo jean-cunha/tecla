@@ -20,12 +20,13 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.leanbitlab.leantype"
+        // Tecla: pacote próprio, para não colidir com o LeanType instalado.
+        applicationId = "br.com.palora.tecla"
         minSdk = 23
         targetSdk = 35
         // ponytail: release version 4.3.3
         versionCode = 4360
-        versionName = "4.3.6"
+        versionName = "1.0.0"
 
         proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         
@@ -186,6 +187,17 @@ android {
     testOptions {
         unitTests {
             isIncludeAndroidResources = true
+            // Tecla: as capturas de tela vão para build/capturas e a CI as publica na branch "capturas".
+            all { test ->
+                test.maxHeapSize = "3g"
+                test.systemProperty("capturas.dir", layout.buildDirectory.dir("capturas").get().asFile.absolutePath)
+                test.testLogging {
+                    events("failed")
+                    exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+                    showCauses = true
+                    showStackTraces = true
+                }
+            }
         }
     }
 

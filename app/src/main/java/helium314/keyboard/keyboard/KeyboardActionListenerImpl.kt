@@ -246,6 +246,10 @@ class KeyboardActionListenerImpl(private val latinIME: LatinIME, private val inp
                 }
                 return
             }
+            KeyCode.TECLA_AI -> {
+                keyboardSwitcher.toggleTeclaPanel()
+                return
+            }
             KeyCode.GIF -> {
                 if (keyboardSwitcher.isGifPickerShowing) {
                     keyboardSwitcher.setAlphabetKeyboard()
@@ -450,7 +454,7 @@ class KeyboardActionListenerImpl(private val latinIME: LatinIME, private val inp
     }
 
     override fun onHorizontalSpaceSwipe(steps: Int): Boolean {
-        if (keyboardSwitcher.isGifPickerShowing) {
+        if (keyboardSwitcher.isHostFieldShowing) {
             val rtl = RichInputMethodManager.getInstance().currentSubtype.isRtlSubtype
             val moveSteps = if (rtl) -steps else steps
             val moved = keyboardSwitcher.onGifMoveCursor(moveSteps)
@@ -468,7 +472,7 @@ class KeyboardActionListenerImpl(private val latinIME: LatinIME, private val inp
     }
 
     override fun onVerticalSpaceSwipe(steps: Int, action: Int): Boolean {
-        if (keyboardSwitcher.isGifPickerShowing || keyboardSwitcher.isShowingClipboardHistory || keyboardSwitcher.isShowingEmojiPalettes) return true
+        if (keyboardSwitcher.isHostFieldShowing || keyboardSwitcher.isShowingClipboardHistory || keyboardSwitcher.isShowingEmojiPalettes) return true
         return when (action) {
             KeyboardActionListener.SWIPE_MOVE_CURSOR -> onMoveCursorVertically(steps)
             KeyboardActionListener.SWIPE_SWITCH_LANGUAGE -> onLanguageSlide(steps, isVertical = true)
@@ -494,7 +498,7 @@ class KeyboardActionListenerImpl(private val latinIME: LatinIME, private val inp
         initialSubtype = null
         subtypeSwitchCount = 0
         cursorMoveStepCount = 0
-        if (keyboardSwitcher.isGifPickerShowing) {
+        if (keyboardSwitcher.isHostFieldShowing) {
             return
         }
         if (isSpaceSwipeActive || latinIME.isCursorGestureActive) {
@@ -595,7 +599,7 @@ class KeyboardActionListenerImpl(private val latinIME: LatinIME, private val inp
 
     override fun onMoveDeletePointer(stepsX: Int, stepsY: Int) {
         var stepsY = stepsY
-        if (keyboardSwitcher.isGifPickerShowing) {
+        if (keyboardSwitcher.isHostFieldShowing) {
             keyboardSwitcher.onGifMoveDeletePointer(stepsX, stepsY)
             return
         }
@@ -947,7 +951,7 @@ class KeyboardActionListenerImpl(private val latinIME: LatinIME, private val inp
     }
 
     override fun onUpWithDeletePointerActive() {
-        if (keyboardSwitcher.isGifPickerShowing) {
+        if (keyboardSwitcher.isHostFieldShowing) {
             keyboardSwitcher.onGifUpWithDeletePointerActive()
             return
         }
@@ -1013,7 +1017,7 @@ class KeyboardActionListenerImpl(private val latinIME: LatinIME, private val inp
     }
 
     private fun onMoveCursorVertically(steps: Int): Boolean {
-        if (steps == 0 || keyboardSwitcher.isGifPickerShowing) return false
+        if (steps == 0 || keyboardSwitcher.isHostFieldShowing) return false
         if (!isSpaceSwipeActive) {
             isSpaceSwipeActive = true
             cursorMoveStepCount = 0
@@ -1045,7 +1049,7 @@ class KeyboardActionListenerImpl(private val latinIME: LatinIME, private val inp
         val rtl = RichInputMethodManager.getInstance().currentSubtype.isRtlSubtype
         val steps = if (rtl) -rawSteps else rawSteps
 
-        if (keyboardSwitcher.isGifPickerShowing) {
+        if (keyboardSwitcher.isHostFieldShowing) {
             val moved = keyboardSwitcher.onGifMoveCursor(steps)
             if (moved) {
                 performHapticFeedback(HapticEvent.GESTURE_MOVE)

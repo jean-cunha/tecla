@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tecla. SPDX-License-Identifier: GPL-3.0-only -->
+<resources>
+    <color name="tecla_window">#0E0E12</color>
+    <style name="TeclaActivityTheme" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/tecla_window</item>
+        <item name="android:colorAccent">#8B74FF</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+</resources>

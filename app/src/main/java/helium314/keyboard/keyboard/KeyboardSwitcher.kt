@@ -92,6 +92,7 @@ class KeyboardSwitcher private constructor() : KeyboardState.SwitchActions {
     private var mOcrResultView: OcrResultView? = null
     private var mTouchpadView: TouchpadView? = null
     private var mGifPickerView: helium314.keyboard.latin.gif.GifPickerView? = null
+    private var mTeclaPanel: br.com.palora.tecla.panel.TeclaAiPanelView? = null
     var editorSession: Long = 1L
         private set
     private var mFakeToastView: TextView? = null
@@ -329,6 +330,8 @@ class KeyboardSwitcher private constructor() : KeyboardState.SwitchActions {
     }
 
     fun hideGifPicker() {
+        // Tecla: tudo o que fecha a busca de GIFs fecha também o painel de IA.
+        hideTeclaPanelView()
         mGifPickerView?.let {
             if (it.isShown || it.visibility == View.VISIBLE) {
                 it.close()
@@ -363,25 +366,118 @@ class KeyboardSwitcher private constructor() : KeyboardState.SwitchActions {
             return picker.isShown || picker.visibility == View.VISIBLE
         }
 
+    // ------------------------------------------------------------------ Tecla: painel de IA
+
+    val isTeclaPanelShowing: Boolean
+        get() {
+            val panel = mTeclaPanel ?: return false
+            return panel.visibility == View.VISIBLE
+        }
+
+    /** Algum painel com campo de texto próprio está aberto (as teclas vão para ele, não para o app). */
+    val isHostFieldShowing: Boolean
+        get() = isTeclaPanelShowing || isGifPickerShowing
+
+    private fun hideTeclaPanelView() {
+        mTeclaPanel?.let {
+            it.close()
+            it.visibility = View.GONE
+        }
+    }
+
+    fun toggleTeclaPanel() {
+        if (isTeclaPanelShowing) {
+            hideGifPicker()
+            setAlphabetKeyboard()
+        } else {
+            setTeclaPanelKeyboard()
+        }
+    }
+
+    fun setTeclaPanelKeyboard() {
+        val latinIme = mLatinIME ?: return
+        val panel = mTeclaPanel ?: return
+        if (InputTypeUtils.isAnyPasswordInputType(latinIme.currentInputEditorInfo?.inputType ?: 0)) {
+            android.widget.Toast.makeText(latinIme, "A IA fica desligada em campos de senha.", android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (isGifPickerShowing) hideGifPicker()
+        latinIme.inputLogic.commitTyped(Settings.getValues(), LastComposedWord.NOT_A_SEPARATOR)
+        setKeyboard(KeyboardId.ELEMENT_ALPHABET, KeyboardSwitchState.OTHER)
+        mStripContainer?.visibility = View.GONE
+        panel.host = object : br.com.palora.tecla.panel.TeclaAiPanelView.Host {
+            override fun inputConnection() = latinIme.currentInputConnection
+            override fun editorInfo() = latinIme.currentInputEditorInfo
+            override fun session() = editorSession
+            override fun palette() = teclaPalette()
+            override fun closePanel() {
+                hideGifPicker()
+                setAlphabetKeyboard()
+            }
+            override fun openApp() {
+                val intent = android.content.Intent(latinIme, br.com.palora.tecla.app.TeclaActivity::class.java)
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                hideGifPicker()
+                setAlphabetKeyboard()
+                latinIme.requestHideSelf(0)
+                latinIme.startActivity(intent)
+            }
+        }
+        panel.visibility = View.VISIBLE
+        panel.open()
+    }
+
+    private fun teclaPalette(): br.com.palora.tecla.panel.PanelPalette? {
+        val colors = Settings.getValues().mColors ?: return null
+        return br.com.palora.tecla.panel.PanelPalette.fromTheme(
+            background = colors.get(ColorType.STRIP_BACKGROUND).let {
+                if (android.graphics.Color.alpha(it) < 200) colors.get(ColorType.MAIN_BACKGROUND) else it
+            },
+            text = colors.get(ColorType.KEY_TEXT),
+            hint = colors.get(ColorType.KEY_HINT_TEXT),
+            icon = colors.get(ColorType.KEY_ICON),
+            themeAccent = colors.get(ColorType.ACTION_KEY_BACKGROUND),
+            themeOnAccent = colors.get(ColorType.ACTION_KEY_ICON),
+        )
+    }
+
     val gifPickerView: helium314.keyboard.latin.gif.GifPickerView? get() = mGifPickerView
     val clipboardHistoryView: ClipboardHistoryView? get() = mClipboardHistoryView
 
-    fun onGifSearchKey(code: Int): Boolean = isGifPickerShowing && mGifPickerView?.onHostKey(code) == true
+    // As funções abaixo atendem a busca de GIFs e o painel de IA (o que estiver aberto).
+    fun onGifSearchKey(code: Int): Boolean = when {
+        isTeclaPanelShowing -> mTeclaPanel?.onHostKey(code) == true
+        isGifPickerShowing -> mGifPickerView?.onHostKey(code) == true
+        else -> false
+    }
 
-    fun onGifSearchText(text: String): Boolean = isGifPickerShowing && mGifPickerView?.onHostText(text) == true
+    fun onGifSearchText(text: String): Boolean = when {
+        isTeclaPanelShowing -> mTeclaPanel?.onHostText(text) == true
+        isGifPickerShowing -> mGifPickerView?.onHostText(text) == true
+        else -> false
+    }
 
     fun onGifMoveDeletePointer(stepsX: Int, stepsY: Int): Boolean {
+        if (isTeclaPanelShowing) {
+            mTeclaPanel?.onMoveDeletePointer(stepsX, stepsY)
+            return true
+        }
         if (!isGifPickerShowing) return false
         mGifPickerView?.onMoveDeletePointer(stepsX, stepsY)
         return true
     }
 
     fun onGifMoveCursor(steps: Int): Boolean {
+        if (isTeclaPanelShowing) return mTeclaPanel?.onMoveCursor(steps) == true
         if (!isGifPickerShowing) return false
         return mGifPickerView?.onMoveCursor(steps) == true
     }
 
     fun onGifUpWithDeletePointerActive(): Boolean {
+        if (isTeclaPanelShowing) {
+            mTeclaPanel?.onUpWithDeletePointerActive()
+            return true
+        }
         if (!isGifPickerShowing) return false
         mGifPickerView?.onUpWithDeletePointerActive()
         return true
@@ -472,7 +568,7 @@ class KeyboardSwitcher private constructor() : KeyboardState.SwitchActions {
         val visibility = if (isImeSuppressedByHardwareKeyboard(settingsValues, toggleState)) View.GONE else View.VISIBLE
         val stripVisibility = if (settingsValues.mToolbarMode == ToolbarMode.HIDDEN
             || (PointerTracker.sPersistentTouchpadModeActive && settingsValues.mTouchpadFullscreen)
-            || isGifPickerShowing) View.GONE else View.VISIBLE
+            || isHostFieldShowing) View.GONE else View.VISIBLE
         mStripContainer?.visibility = stripVisibility
         val wasSecondaryShowing = (mEmojiPalettesView?.visibility == View.VISIBLE)
             || (mClipboardHistoryView?.visibility == View.VISIBLE)
@@ -1256,7 +1352,7 @@ class KeyboardSwitcher private constructor() : KeyboardState.SwitchActions {
         get() = mTouchpadView?.let { it.isShown || it.visibility == View.VISIBLE } == true
 
     val isSecondaryViewShowing: Boolean
-        get() = isGifPickerShowing || isShowingEmojiPalettes || isShowingClipboardHistory || isOcrShowing || isHandwritingShowing || isTouchpadShowing
+        get() = isHostFieldShowing || isShowingEmojiPalettes || isShowingClipboardHistory || isOcrShowing || isHandwritingShowing || isTouchpadShowing
 
     val isShowingPopupKeysPanel: Boolean
         get() {
@@ -1317,7 +1413,7 @@ class KeyboardSwitcher private constructor() : KeyboardState.SwitchActions {
         get() = mStylePreviewStripView?.visibility == View.VISIBLE
 
     fun updateStripVisibility(settingsValues: SettingsValues = Settings.getValues()) {
-        if (isGifPickerShowing) {
+        if (isHostFieldShowing) {
             mStripContainer?.visibility = View.GONE
             return
         }
@@ -1384,6 +1480,7 @@ class KeyboardSwitcher private constructor() : KeyboardState.SwitchActions {
         mOcrCameraView = inputView.findViewById(R.id.ocr_camera_view)
         mOcrResultView = inputView.findViewById(R.id.ocr_result_view)
         mGifPickerView = inputView.findViewById(R.id.gif_picker_view)
+        mTeclaPanel = inputView.findViewById(R.id.tecla_ai_panel)
         mFakeToastView = inputView.findViewById(R.id.fakeToast)
 
         mOcrCameraView?.setListener(object : OcrCameraView.OcrViewListener {

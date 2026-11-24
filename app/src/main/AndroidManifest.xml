@@ -85,6 +85,20 @@ SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-only
         </service>
 
         <!-- Activities -->
+        <!-- Tecla: a tela do app (IA) é a que abre pelo ícone; as configurações do teclado ficam um toque adiante. -->
+        <activity android:name="br.com.palora.tecla.app.TeclaActivity"
+                android:theme="@style/TeclaActivityTheme"
+                android:label="@string/tecla_app_name"
+                android:icon="@mipmap/ic_launcher"
+                android:windowSoftInputMode="adjustResize"
+                android:launchMode="singleTop"
+                android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
         <activity android:name="helium314.keyboard.settings.SettingsActivity"
                 android:theme="@style/platformActivityTheme"
                 android:icon="@mipmap/ic_launcher"
@@ -92,7 +106,6 @@ SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-only
                 android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
 

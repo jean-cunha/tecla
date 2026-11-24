@@ -194,6 +194,7 @@ class KeyboardIconsSet private constructor() {
                     ToolbarKey.TRANSLATE -> R.drawable.ic_translate
                     ToolbarKey.OCR -> R.drawable.ic_ocr
                     ToolbarKey.GIF -> R.drawable.ic_gif
+                    ToolbarKey.TECLA_AI -> R.drawable.ic_tecla_ai
                     ToolbarKey.FONT_STYLE -> R.drawable.ic_font_style
                     ToolbarKey.CUSTOM_AI_1 -> R.drawable.ic_custom_ai_1
                     ToolbarKey.CUSTOM_AI_2 -> R.drawable.ic_custom_ai_2
@@ -279,6 +280,7 @@ class KeyboardIconsSet private constructor() {
                     ToolbarKey.TRANSLATE -> R.drawable.ic_translate
                     ToolbarKey.OCR -> R.drawable.ic_ocr
                     ToolbarKey.GIF -> R.drawable.ic_gif
+                    ToolbarKey.TECLA_AI -> R.drawable.ic_tecla_ai
                     ToolbarKey.FONT_STYLE -> R.drawable.ic_font_style
                     ToolbarKey.CUSTOM_AI_1 -> R.drawable.ic_custom_ai_1
                     ToolbarKey.CUSTOM_AI_2 -> R.drawable.ic_custom_ai_2
@@ -364,6 +366,7 @@ class KeyboardIconsSet private constructor() {
                     ToolbarKey.TRANSLATE -> R.drawable.ic_translate_rounded
                     ToolbarKey.OCR -> R.drawable.ic_ocr
                     ToolbarKey.GIF -> R.drawable.ic_gif_rounded
+                    ToolbarKey.TECLA_AI -> R.drawable.ic_tecla_ai_rounded
                     ToolbarKey.FONT_STYLE -> R.drawable.ic_font_style_rounded
                     ToolbarKey.CUSTOM_AI_1 -> R.drawable.ic_custom_ai_1
                     ToolbarKey.CUSTOM_AI_2 -> R.drawable.ic_custom_ai_2

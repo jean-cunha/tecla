@@ -1638,7 +1638,7 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
         val isPassword = InputTypeUtils.isAnyPasswordInputType(
             KeyboardSwitcher.getInstance().latinIME?.currentInputEditorInfo?.inputType ?: 0
         )
-        val pinnedCount = pinnedList.count { it != ToolbarKey.GIF || !isPassword }
+        val pinnedCount = pinnedList.count { (it != ToolbarKey.GIF && it != ToolbarKey.TECLA_AI) || !isPassword }
         val totalKeys = pinnedCount + 1 // +1 for expand key
         if (totalKeys <= 1) return baseDim
 
@@ -1700,7 +1700,7 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
                 getEnabledToolbarKeys(context.prefs()).filterNot { it in pinnedKeysList }
             }
             for (key in keysToRender) {
-                if (key == ToolbarKey.GIF && isPassword) continue
+                if ((key == ToolbarKey.GIF || key == ToolbarKey.TECLA_AI) && isPassword) continue
                 val button = createToolbarKey(context, key)
                 button.layoutParams = LinearLayout.LayoutParams(effectiveDim, effectiveDim).apply {
                     gravity = Gravity.CENTER_VERTICAL
@@ -1714,7 +1714,7 @@ class SuggestionStripView(context: Context, attrs: AttributeSet?, defStyle: Int)
         // Only draw pinned keys if not in split mode
         if (!isSplitToolbar && !Settings.getValues().mSuggestionStripHiddenPerUserSettings) {
             for (pinnedKey in pinnedKeysList) {
-                if (pinnedKey == ToolbarKey.GIF && isPassword) continue
+                if ((pinnedKey == ToolbarKey.GIF || pinnedKey == ToolbarKey.TECLA_AI) && isPassword) continue
                 val button = createToolbarKey(context, pinnedKey)
                 button.layoutParams = LinearLayout.LayoutParams(effectiveDim, effectiveDim).apply {
                     gravity = Gravity.CENTER_VERTICAL

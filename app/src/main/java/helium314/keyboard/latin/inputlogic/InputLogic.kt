@@ -550,7 +550,7 @@ class InputLogic(
         handler.showGesturePreviewAndSetSuggestions(SuggestedWords.getEmptyBatchInstance(), false)
         handler.cancelUpdateSuggestionStrip()
         ++mAutoCommitSequenceNumber
-        val isInternalField = keyboardSwitcher.isGifPickerShowing ||
+        val isInternalField = keyboardSwitcher.isHostFieldShowing ||
                 keyboardSwitcher.isShowingClipboardHistory ||
                 keyboardSwitcher.isShowingEmojiPalettes
         if (isInternalField) {
@@ -882,7 +882,7 @@ class InputLogic(
                 if (keyboard != null && !keyboard.mId.isAlphabetKeyboard && keyboard.mId.mElementId != KeyboardId.ELEMENT_TEXT_EDIT) {
                     return
                 }
-                if (KeyboardSwitcher.getInstance().isGifPickerShowing) {
+                if (KeyboardSwitcher.getInstance().isHostFieldShowing) {
                     return
                 }
                 if (!KeyboardSwitcher.getInstance().isShiftChording) {

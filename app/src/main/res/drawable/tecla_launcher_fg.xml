@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tecla: tecla branca com faísca. SPDX-License-Identifier: GPL-3.0-only -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- profundidade da tecla -->
+    <path
+        android:fillColor="#FF2B1A8F"
+        android:fillAlpha="0.45"
+        android:pathData="M43,37h22a12,12 0,0 1,12 12v18a12,12 0,0 1,-12 12h-22a12,12 0,0 1,-12 -12v-18a12,12 0,0 1,12 -12z" />
+    <!-- tecla -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M43,32h22a12,12 0,0 1,12 12v18a12,12 0,0 1,-12 12h-22a12,12 0,0 1,-12 -12v-18a12,12 0,0 1,12 -12z" />
+    <!-- faísca principal -->
+    <path
+        android:fillColor="#FF6A4FF5"
+        android:pathData="M54,40C55.1,48.6 58.4,51.9 67,53C58.4,54.1 55.1,57.4 54,66C52.9,57.4 49.6,54.1 41,53C49.6,51.9 52.9,48.6 54,40Z" />
+    <!-- faísca âmbar -->
+    <path
+        android:fillColor="#FFFFC24B"
+        android:pathData="M70,30C70.5,34.1 71.9,35.5 76,36C71.9,36.5 70.5,37.9 70,42C69.5,37.9 68.1,36.5 64,36C68.1,35.5 69.5,34.1 70,30Z" />
+</vector>

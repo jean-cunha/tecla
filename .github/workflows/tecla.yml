@@ -1,0 +1,123 @@
+name: Tecla
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: tecla-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GRADLE_ARGS: --stacktrace
+    steps:
+      - name: Código
+        uses: actions/checkout@v4
+
+      - name: JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Memória do Gradle (o gradle.properties do projeto é pensado para um notebook de 8 GB)
+        run: |
+          mkdir -p ~/.gradle
+          {
+            echo "org.gradle.jvmargs=-Xmx5g -XX:MaxMetaspaceSize=1g -XX:+UseParallelGC"
+            echo "org.gradle.workers.max=4"
+          } >> ~/.gradle/gradle.properties
+
+      - name: Chave de assinatura (sempre a mesma, para o APK novo instalar por cima do antigo)
+        env:
+          KEYSTORE_B64: ${{ secrets.TECLA_KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.TECLA_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > tecla-release.jks
+            pw="$KEYSTORE_PASSWORD"
+          else
+            # Sem os segredos: gera uma chave só para esta execução. O APK instala, mas a próxima
+            # versão terá outra assinatura e exigirá desinstalar antes. Crie os segredos para evitar isso.
+            echo "::warning::Sem TECLA_KEYSTORE_B64: APK assinado com chave temporária (não atualiza por cima)."
+            pw="$(openssl rand -base64 18)"
+            keytool -genkeypair -keystore tecla-release.jks -storetype PKCS12 -alias tecla -keyalg RSA -keysize 2048 \
+              -validity 10000 -storepass "$pw" -keypass "$pw" -dname "CN=Tecla, O=Palora, C=BR" > /dev/null
+          fi
+          {
+            echo "storeFile=tecla-release.jks"
+            echo "storePassword=$pw"
+            echo "keyAlias=tecla"
+            echo "keyPassword=$pw"
+          } > keystore.properties
+
+      - name: Testes do Tecla e capturas de tela
+        id: testes
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          chmod +x gradlew
+          ./gradlew :app:testStandardDebugUnitTest --tests "br.com.palora.tecla.*" $GRADLE_ARGS 2>&1 | tee test.log
+
+      - name: Resumo dos erros (testes)
+        if: steps.testes.outcome == 'failure'
+        run: grep -E '^e: |^w: .*(error|unresolved)|FAILED|Execution failed for task|Exception|expected' test.log | head -150 || true
+
+      - name: Capturas na branch "capturas"
+        if: always()
+        run: |
+          pasta=app/build/capturas
+          if ls "$pasta"/*.png > /dev/null 2>&1; then
+            mkdir -p /tmp/capturas && cp "$pasta"/*.png /tmp/capturas/
+            git config user.name "ci"
+            git config user.email "ci@users.noreply.github.com"
+            git checkout --orphan capturas-tmp
+            git rm -rf . -q
+            cp /tmp/capturas/*.png .
+            git add -- *.png
+            git commit -q -m "Capturas de $GITHUB_SHA"
+            git push -f origin capturas-tmp:capturas
+            git checkout -q "$GITHUB_SHA"
+          else
+            echo "Sem capturas nesta execução."
+          fi
+
+      - name: APK de release (assinado)
+        run: |
+          set -o pipefail
+          ./gradlew :app:assembleStandardRelease $GRADLE_ARGS 2>&1 | tee build.log
+
+      - name: Resumo dos erros (APK)
+        if: failure()
+        run: grep -E '^e: |^w: .*(error|unresolved)|FAILED|Execution failed for task|ERROR|error:' build.log | head -150 || true
+
+      - name: Publicar o APK numa Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          versao="$(sed -n 's/^ *versionName = "\(.*\)"/\1/p' app/build.gradle.kts | head -1)"
+          apk="$(ls app/build/outputs/apk/standard/release/*.apk | head -1)"
+          nome="Tecla-${versao}-${GITHUB_SHA::7}.apk"
+          cp "$apk" "$nome"
+          tag="v${versao}-${GITHUB_SHA::7}"
+          gh release create "$tag" "$nome" --target "$GITHUB_SHA" --prerelease \
+            --title "Tecla ${versao} (${GITHUB_SHA::7})" \
+            --notes "APK gerado pela CI. Instale baixando o arquivo .apk pelo celular."
+          echo "Release: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${tag}"
+
+      - name: Marcar a execução como falha se os testes falharam
+        if: steps.testes.outcome == 'failure'
+        run: |
+          echo "O APK saiu, mas os testes/capturas falharam. Veja o passo de testes."
+          exit 1

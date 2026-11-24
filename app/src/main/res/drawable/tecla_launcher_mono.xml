@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tecla: ícone monocromático (ícones temáticos). SPDX-License-Identifier: GPL-3.0-only -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillType="evenOdd"
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M43,32h22a12,12 0,0 1,12 12v18a12,12 0,0 1,-12 12h-22a12,12 0,0 1,-12 -12v-18a12,12 0,0 1,12 -12zM54,40C52.9,48.6 49.6,51.9 41,53C49.6,54.1 52.9,57.4 54,66C55.1,57.4 58.4,54.1 67,53C58.4,51.9 55.1,48.6 54,40Z" />
+</vector>

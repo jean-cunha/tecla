@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tecla. SPDX-License-Identifier: GPL-3.0-only -->
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- nome da tecla da barra (precisa ser igual ao nome do ToolbarKey em minúsculas) -->
+    <string name="tecla_ai" translatable="false" tools:keep="@string/tecla_ai">Tecla IA</string>
+    <string name="tecla_app_name" translatable="false">Tecla</string>
+</resources>

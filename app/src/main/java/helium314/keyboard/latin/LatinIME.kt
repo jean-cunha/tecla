@@ -1598,7 +1598,7 @@ class LatinIME : InputMethodService(),
     }
 
     override fun onCodeInput(codePoint: Int, x: Int, y: Int, isKeyRepeat: Boolean) {
-        if (keyboardSwitcher.isGifPickerShowing && keyboardSwitcher.onGifSearchKey(codePoint)) {
+        if (keyboardSwitcher.isHostFieldShowing && keyboardSwitcher.onGifSearchKey(codePoint)) {
             val event = Event.createSoftwareKeypressEvent(codePoint, 0, x, y, isKeyRepeat)
             keyboardSwitcher.onEvent(event, Constants.TextUtils.CAP_MODE_OFF, null)
             val keyboard = keyboardSwitcher.keyboard
@@ -1611,7 +1611,7 @@ class LatinIME : InputMethodService(),
     }
 
     fun onEvent(event: Event) {
-        if (keyboardSwitcher.isGifPickerShowing) {
+        if (keyboardSwitcher.isHostFieldShowing) {
             if (event.keyCode == KeyCode.SHIFT) {
                 return
             }
@@ -1684,7 +1684,7 @@ class LatinIME : InputMethodService(),
 
     fun onTextInput(rawText: String?) {
         if (rawText == null) return
-        if (keyboardSwitcher.isGifPickerShowing && keyboardSwitcher.onGifSearchText(rawText)) return
+        if (keyboardSwitcher.isHostFieldShowing && keyboardSwitcher.onGifSearchText(rawText)) return
         val event = Event.createSoftwareTextEvent(rawText, KeyCode.MULTIPLE_CODE_POINTS, null)
         val completeInputTransaction = inputLogic.onTextInput(settings.current, event, keyboardSwitcher.keyboardShiftMode, handler)
         updateStateAfterInputTransaction(completeInputTransaction)
@@ -1825,7 +1825,7 @@ class LatinIME : InputMethodService(),
         }
         val currentSettingsValues = settings.current
         inputLogic.setSuggestedWords(suggestedWords)
-        if (keyboardSwitcher.isGifPickerShowing) return
+        if (keyboardSwitcher.isHostFieldShowing) return
         if (!hasSuggestionStripView()) return
         if (!onEvaluateInputViewShown() && !currentSettingsValues.mHasHardwareKeyboard) return
         
@@ -2104,7 +2104,7 @@ class LatinIME : InputMethodService(),
             keyboardSwitcher.hideOcrPanels()
             return true
         }
-        if (keyCode == KeyEvent.KEYCODE_BACK && keyboardSwitcher.isGifPickerShowing) {
+        if (keyCode == KeyEvent.KEYCODE_BACK && keyboardSwitcher.isHostFieldShowing) {
             keyboardSwitcher.hideGifPicker()
             return true
         }
@@ -2119,7 +2119,7 @@ class LatinIME : InputMethodService(),
         if (keyCode == KeyEvent.KEYCODE_BACK && keyboardSwitcher.isOcrShowing) {
             return true
         }
-        if (keyCode == KeyEvent.KEYCODE_BACK && keyboardSwitcher.isGifPickerShowing) {
+        if (keyCode == KeyEvent.KEYCODE_BACK && keyboardSwitcher.isHostFieldShowing) {
             return true
         }
         if (keyboardActionListener.onKeyUp(keyCode, keyEvent)) return true
@@ -2336,7 +2336,7 @@ class LatinIME : InputMethodService(),
                     val suggestedWords = msg.obj as SuggestedWords
                     val word = if (suggestedWords.isEmpty) null else suggestedWords.getWord(0)
                     if (!word.isNullOrEmpty()) {
-                        if (latinIme.keyboardSwitcher.isGifPickerShowing) {
+                        if (latinIme.keyboardSwitcher.isHostFieldShowing) {
                             val suffix = if (latinIme.settings.current.mAutospaceAfterGestureTyping) " " else ""
                             latinIme.keyboardSwitcher.onGifSearchText(word + suffix)
                             latinIme.onTailBatchInputResultShown(suggestedWords)

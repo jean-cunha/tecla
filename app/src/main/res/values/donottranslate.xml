@@ -74,7 +74,7 @@
     <string name="layout_tamil_v4" translatable="false">Tamil (V4)</string>
     <string name="layout_tamil" translatable="false">Tamil</string>
 
-    <string name="english_ime_name" translatable="false">LeanType</string>
+    <string name="english_ime_name" translatable="false">Tecla</string>
     <string name="open_collective" translatable="false">Open Collective</string>
 
 </resources>
