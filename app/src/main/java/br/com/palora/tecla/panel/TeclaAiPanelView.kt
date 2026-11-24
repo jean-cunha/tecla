@@ -46,7 +46,8 @@ import br.com.palora.tecla.core.SourceKind
 import br.com.palora.tecla.core.TeclaAction
 import br.com.palora.tecla.core.TeclaException
 import br.com.palora.tecla.core.TeclaHistory
-import br.com.palora.tecla.core.TeclaSession
+import br.com.palora.tecla.core.Session
+import br.com.palora.tecla.core.TeclaSessions
 import br.com.palora.tecla.core.TeclaSettings
 import br.com.palora.tecla.core.Turn
 import helium314.keyboard.keyboard.internal.keyboard_parser.floris.KeyCode
@@ -87,11 +88,11 @@ class TeclaAiPanelView @JvmOverloads constructor(
 
     var host: Host? = null
 
-    private enum class Mode { COMPOSE, RESULT, HISTORY, SESSION }
+    private enum class Mode { COMPOSE, RESULT, HISTORY, SESSIONS }
 
     private val settings by lazy { TeclaSettings(context) }
     private val historyStore by lazy { TeclaHistory(context) }
-    private val session by lazy { TeclaSession(context) { settings.sessionTimeout } }
+    private val sessions by lazy { TeclaSessions(context) }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var job: Job? = null
 
@@ -124,8 +125,14 @@ class TeclaAiPanelView @JvmOverloads constructor(
     // para "Gerar de novo" e os ajustes não mandarem a própria troca como contexto).
     private var sessionHistory: List<Exchange> = emptyList()
     private var exchangeRecorded = false
+    private var runSessionId: String? = null
     private var previewSession: Int? = null
     private var previewSessionName: String? = null
+    private var previewSessions: List<Session>? = null
+
+    // Lista de sessões: renomeando qual (null = o campo cria uma nova) e qual está pedindo confirmação para apagar.
+    private var renamingId: String? = null
+    private var confirmDeleteId: String? = null
 
     // Arrastar da tecla apagar
     private var deleteDragStart = -1
@@ -203,13 +210,14 @@ class TeclaAiPanelView @JvmOverloads constructor(
         sessionCount: Int? = null,
         usedContext: Boolean = false,
         sessionName: String? = null,
-        sessionCard: Boolean = false,
+        sessionsList: List<Session>? = null,
     ) {
         this.palette = palette
         isOpen = true
         previewNotReady = notReady
         previewSession = sessionCount
         previewSessionName = sessionName
+        previewSessions = sessionsList
         sessionHistory = if (usedContext) listOf(Exchange(0, "", "", "")) else emptyList()
         sources = listOf(source, Source.NONE).distinctBy { it.kind }
         this.source = source
@@ -223,7 +231,7 @@ class TeclaAiPanelView @JvmOverloads constructor(
         elapsedMs = 1400
         runModel = "gpt-6-luna"
         mode = when {
-            sessionCard -> Mode.SESSION
+            sessionsList != null -> Mode.SESSIONS
             history -> Mode.HISTORY
             result != null || error != null || streaming -> Mode.RESULT
             else -> Mode.COMPOSE
@@ -356,15 +364,12 @@ class TeclaAiPanelView @JvmOverloads constructor(
         updateSendButton()
     }
 
-    private fun maxFieldChars() = if (mode == Mode.SESSION) TeclaSession.MAX_NAME else MAX_PROMPT_CHARS
+    private fun maxFieldChars() = if (mode == Mode.SESSIONS) TeclaSessions.MAX_NAME else MAX_PROMPT_CHARS
 
     private fun submitField() {
         val text = field.value.trim()
-        if (mode == Mode.SESSION) {
-            if (previewSession == null) session.rename(text)
-            mode = Mode.COMPOSE
-            field.setValue("")
-            render()
+        if (mode == Mode.SESSIONS) {
+            submitSessionName(text)
             return
         }
         if (running) return
@@ -389,7 +394,9 @@ class TeclaAiPanelView @JvmOverloads constructor(
         runInstruction = instruction
         fromHistory = false
         exchangeRecorded = false
-        sessionHistory = if (session.isActive()) TeclaSession.fit(session.exchanges()) else emptyList()
+        val active = activeSession()
+        runSessionId = active?.id
+        sessionHistory = active?.let { TeclaSessions.fit(it.exchanges) } ?: emptyList()
         request()
     }
 
@@ -479,50 +486,88 @@ class TeclaAiPanelView @JvmOverloads constructor(
         job = null
     }
 
-    /** Guarda a troca na sessão (se houver uma ligada). Ajustes e "Gerar de novo" só trocam a resposta. */
+    /** Guarda a troca na sessão escolhida quando o pedido começou. Ajustes e "Gerar de novo" só trocam a resposta. */
     private fun recordExchange() {
         if (fromHistory || previewSession != null) return
+        val id = runSessionId ?: return
         runCatching {
-            if (!session.isActive()) return
             if (!exchangeRecorded) {
-                session.add(Exchange(System.currentTimeMillis(), runLabel, Prompts.userForHistory(runInstruction, source), resultText))
+                sessions.add(id, Exchange(System.currentTimeMillis(), runLabel, Prompts.userForHistory(runInstruction, source), resultText))
                 exchangeRecorded = true
             } else {
-                session.replaceLastAnswer(resultText)
+                sessions.replaceLastAnswer(id, resultText)
             }
         }
     }
 
-    /** -1 = sem sessão; senão, quantas trocas ela já tem. */
-    private fun sessionCount(): Int = previewSession ?: runCatching { if (session.isActive()) session.count() else -1 }.getOrDefault(-1)
+    private fun activeSession(): Session? = if (previewSession != null) null else runCatching { sessions.active() }.getOrNull()
 
-    private fun startSession() {
-        if (previewSession != null) return
-        session.start()
-        toast("Sessão iniciada: os próximos pedidos lembram do que já foi falado.")
-        performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-        render()
-    }
+    /** -1 = sem sessão escolhida; senão, quantas trocas ela já tem. */
+    private fun sessionCount(): Int = previewSession ?: (activeSession()?.exchanges?.size ?: -1)
 
-    private fun endSession() {
-        if (previewSession == null) session.end()
-        sessionHistory = emptyList()
-        mode = Mode.COMPOSE
-        field.setValue("")
-        toast("Sessão encerrada. Os próximos pedidos começam do zero.")
-        render()
-    }
+    private fun sessionName(): String = previewSessionName ?: activeSession()?.name ?: TeclaSessions.DEFAULT_NAME
 
-    /** Toque no selo: abre o cartão da sessão, com o nome no campo (o teclado de baixo edita) e o botão de encerrar. */
-    private fun openSessionCard() {
+    private fun sessionList(): List<Session> = previewSessions ?: runCatching { sessions.all() }.getOrDefault(emptyList())
+
+    /** Abre a lista de sessões. Nada é criado aqui: criar é sempre pelo campo, com um toque. */
+    private fun openSessions() {
         stopJob()
         running = false
-        mode = Mode.SESSION
-        field.setValue(sessionName())
+        renamingId = null
+        confirmDeleteId = null
+        mode = Mode.SESSIONS
+        field.setValue("")
         render()
     }
 
-    private fun sessionName(): String = previewSessionName ?: runCatching { session.name() }.getOrDefault(TeclaSession.DEFAULT_NAME)
+    private fun selectSession(id: String?) {
+        if (previewSessions == null) sessions.select(id)
+        performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+        mode = Mode.COMPOSE
+        field.setValue("")
+        render()
+    }
+
+    /** Primeiro toque na lixeira pede confirmação; o segundo apaga. */
+    private fun deleteSession(id: String) {
+        if (confirmDeleteId != id) {
+            confirmDeleteId = id
+            render()
+            return
+        }
+        if (previewSessions == null) sessions.delete(id)
+        confirmDeleteId = null
+        if (renamingId == id) {
+            renamingId = null
+            field.setValue("")
+        }
+        render()
+    }
+
+    private fun beginRename(s: Session) {
+        renamingId = s.id
+        confirmDeleteId = null
+        field.setValue(s.name)
+        render()
+    }
+
+    private fun submitSessionName(text: String) {
+        if (previewSessions != null) return
+        val renaming = renamingId
+        if (renaming != null) {
+            sessions.rename(renaming, text)
+            renamingId = null
+            field.setValue("")
+            render()
+            return
+        }
+        val name = text.ifBlank { "Sessão ${sessions.all().size + 1}" }
+        sessions.create(name)
+        toast("Sessão \"${TeclaSessions.cleanName(name)}\" criada e escolhida.")
+        mode = Mode.COMPOSE
+        field.setValue("")
+        render()
+    }
 
     private fun saveHistory() {
         if (!settings.historyEnabled) return
@@ -621,7 +666,7 @@ class TeclaAiPanelView @JvmOverloads constructor(
                 }
             }
             Mode.HISTORY -> addView(historyList())
-            Mode.SESSION -> addView(sessionCard())
+            Mode.SESSIONS -> addView(sessionsList())
         }
         if (mode != Mode.HISTORY && ready) addView(fieldRow())
     }
@@ -651,7 +696,13 @@ class TeclaAiPanelView @JvmOverloads constructor(
             imageTintList = ColorStateList.valueOf(PanelPalette.SPARK)
             layoutParams = LayoutParams(dp(18), dp(18)).apply { marginStart = dp(2); marginEnd = dp(8) }
         })
-        row.addView(text(if (mode == Mode.HISTORY) "Histórico" else "Tecla IA", 15.5f, palette.text, bold = true))
+        val title = when (mode) {
+            Mode.HISTORY -> "Histórico"
+            Mode.SESSIONS -> "Sessões"
+            else -> "Tecla IA"
+        }
+        row.addView(text(title, 15.5f, palette.text, bold = true))
+        if (mode == Mode.SESSIONS) return row
         row.addView(View(context), LayoutParams(0, 1, 1f))
 
         if (mode == Mode.HISTORY) {
@@ -674,7 +725,7 @@ class TeclaAiPanelView @JvmOverloads constructor(
             if (count >= 0) {
                 row.addView(sessionPill(count))
             } else {
-                row.addView(iconButton(R.drawable.tecla_ic_session, "Iniciar sessão de contexto", palette.icon) { startSession() })
+                row.addView(iconButton(R.drawable.tecla_ic_session, "Sessões", palette.icon) { openSessions() })
             }
         }
         row.addView(iconButton(R.drawable.tecla_ic_history, "Histórico", palette.icon) {
@@ -694,8 +745,8 @@ class TeclaAiPanelView @JvmOverloads constructor(
         setPadding(dp(9), 0, dp(10), 0)
         background = rippled(round(palette.accentSoft, 13f), 13f)
         layoutParams = LayoutParams(LayoutParams.WRAP_CONTENT, dp(26)).apply { marginStart = dp(4); marginEnd = dp(2) }
-        contentDescription = "Sessão $name ligada, $count trocas. Toque para renomear ou encerrar"
-        setOnClickListener { openSessionCard() }
+        contentDescription = "Sessão $name, $count trocas. Toque para trocar, renomear ou apagar"
+        setOnClickListener { openSessions() }
         addView(View(context).apply {
             background = round(palette.accent, 4f)
             layoutParams = LayoutParams(dp(7), dp(7)).apply { marginEnd = dp(6) }
@@ -708,41 +759,72 @@ class TeclaAiPanelView @JvmOverloads constructor(
         if (count > 0) addView(text(" $count", 12f, palette.onAccentSoft))
     }
 
-    private fun sessionCard(): View {
-        val card = card()
-        val count = sessionCount().coerceAtLeast(0)
-        val top = LinearLayout(context).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        top.addView(FrameLayout(context).apply {
-            background = round(palette.accentSoft, 20f)
-            layoutParams = LayoutParams(dp(40), dp(40))
-            addView(ImageView(context).apply {
-                setImageResource(R.drawable.tecla_ic_session)
-                imageTintList = ColorStateList.valueOf(palette.onAccentSoft)
-                layoutParams = FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER)
+    /** Lista de sessões: escolher, renomear, apagar; o campo de baixo cria uma nova (ou renomeia). */
+    private fun sessionsList(): View {
+        val list = sessionList()
+        val activeId = if (previewSessions != null) previewSessions?.firstOrNull()?.id else activeSession()?.id
+        val scroll = BoundedScrollView(context, maxHistoryHeight()).apply {
+            isVerticalScrollBarEnabled = false
+            overScrollMode = OVER_SCROLL_NEVER
+            layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
+        }
+        val col = LinearLayout(context).apply { orientation = VERTICAL }
+        col.addView(sessionRow(null, "Sem sessão", "Cada pedido começa do zero", activeId == null))
+        val fmt = DateFormat.getDateInstance(DateFormat.SHORT)
+        list.forEach { item ->
+            val n = item.exchanges.size
+            val trocas = when (n) { 0 -> "nenhuma troca"; 1 -> "1 troca"; else -> "$n trocas" }
+            col.addView(sessionRow(item, item.name, "$trocas · ${fmt.format(Date(item.updated))}", item.id == activeId))
+        }
+        if (list.isEmpty()) {
+            col.addView(text("Crie uma sessão para cada assunto. A IA lembra do que já foi falado nela, mesmo dias depois.", 13.5f, palette.muted).apply {
+                setPadding(dp(6), dp(8), dp(6), dp(4))
+            })
+        }
+        scroll.addView(col)
+        return scroll
+    }
+
+    private fun sessionRow(item: Session?, title: String, subtitle: String, selected: Boolean): View {
+        val row = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(8), dp(6), dp(8))
+            background = rippled(round(if (selected) palette.accentSoft else palette.surface, 16f), 16f)
+            layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(6) }
+            setOnClickListener { selectSession(item?.id) }
+        }
+        // marcador de escolha
+        row.addView(FrameLayout(context).apply {
+            layoutParams = LayoutParams(dp(20), dp(20)).apply { marginEnd = dp(12) }
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setStroke(dp(2), if (selected) palette.accent else palette.muted)
+            }
+            if (selected) addView(View(context).apply {
+                background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(palette.accent) }
+                layoutParams = FrameLayout.LayoutParams(dp(10), dp(10), Gravity.CENTER)
             })
         })
         val col = LinearLayout(context).apply {
             orientation = VERTICAL
-            layoutParams = LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(12) }
+            layoutParams = LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f)
         }
-        col.addView(text("Sessão de contexto", 15f, palette.text, bold = true))
-        val minutes = if (previewSession != null) 30 else settings.sessionTimeout
-        val trocas = when (count) {
-            0 -> "nenhuma troca ainda"
-            1 -> "1 troca"
-            else -> "$count trocas"
+        val fg = if (selected) palette.onAccentSoft else palette.text
+        col.addView(text(title, 15f, fg, bold = true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
+        col.addView(text(subtitle, 12.5f, if (selected) palette.onAccentSoft else palette.muted).apply { setPadding(0, dp(2), 0, 0) })
+        row.addView(col)
+        if (item != null) {
+            row.addView(iconButton(R.drawable.tecla_ic_pencil, "Renomear ${item.name}", fg) { beginRename(item) })
+            if (confirmDeleteId == item.id) {
+                row.addView(pill("Apagar?", palette.error, palette.background) { deleteSession(item.id) }.apply {
+                    contentDescription = "Toque de novo para apagar ${item.name}"
+                })
+            } else {
+                row.addView(iconButton(R.drawable.tecla_ic_delete, "Apagar ${item.name}", fg) { deleteSession(item.id) })
+            }
         }
-        val prazo = if (minutes > 0) "termina após ${if (minutes >= 60) "${minutes / 60} h" else "$minutes min"} sem uso" else "não termina sozinha"
-        col.addView(text("$trocas · $prazo", 13f, palette.muted).apply { setPadding(0, dp(2), 0, 0) })
-        top.addView(col)
-        card.addView(top)
-        card.addView(text("Mude o nome no campo abaixo (até ${TeclaSession.MAX_NAME} caracteres) e toque em ✓.", 13.5f, palette.muted).apply {
-            setPadding(dp(2), dp(12), dp(2), 0)
-        })
-        card.addView(button("Encerrar sessão", primary = false, iconRes = R.drawable.tecla_ic_close) { endSession() }.apply {
-            (layoutParams as LayoutParams).topMargin = dp(12)
-        })
-        return card
+        return row
     }
 
     private fun setupCard(): View {
@@ -978,7 +1060,8 @@ class TeclaAiPanelView @JvmOverloads constructor(
         }
         (field.parent as? ViewGroup)?.removeView(field)
         field.hint = when {
-            mode == Mode.SESSION -> "Nome da sessão"
+            mode == Mode.SESSIONS && renamingId != null -> "Novo nome (até ${TeclaSessions.MAX_NAME})"
+            mode == Mode.SESSIONS -> "Nova sessão: digite o nome"
             mode == Mode.RESULT && error == null && resultText.isNotBlank() -> "Ajustar: “mais curto”, “sem emoji”…"
             source.kind == SourceKind.NONE && sessionCount() > 0 -> "Continue a conversa…"
             source.kind == SourceKind.NONE -> "Pergunte ou peça qualquer coisa…"
@@ -1014,19 +1097,21 @@ class TeclaAiPanelView @JvmOverloads constructor(
     private fun updateSendButton() {
         val send = sendButton ?: return
         val img = sendIcon ?: return
-        val active = running || field.value.isNotBlank() || mode == Mode.SESSION
+        val active = running || field.value.isNotBlank() || mode == Mode.SESSIONS
         send.background = rippled(round(if (active) palette.accent else palette.surface, 23f), 23f)
         img.setImageResource(
             when {
                 running -> R.drawable.tecla_ic_stop
-                mode == Mode.SESSION -> R.drawable.tecla_ic_check
+                mode == Mode.SESSIONS && renamingId != null -> R.drawable.tecla_ic_check
+                mode == Mode.SESSIONS -> R.drawable.tecla_ic_add
                 else -> R.drawable.tecla_ic_send
             }
         )
         img.imageTintList = ColorStateList.valueOf(if (active) palette.onAccent else palette.muted)
         send.contentDescription = when {
             running -> "Parar"
-            mode == Mode.SESSION -> "Salvar o nome"
+            mode == Mode.SESSIONS && renamingId != null -> "Salvar o nome"
+            mode == Mode.SESSIONS -> "Criar sessão"
             else -> "Enviar"
         }
         send.isEnabled = active

@@ -387,7 +387,8 @@ val defaultToolbarPref by lazy {
     val default = when (helium314.keyboard.latin.BuildConfig.FLAVOR) {
         "offline" -> listOf(TECLA_AI, SETTINGS, VOICE, CLIPBOARD, HANDWRITING, OCR, GIF, CUSTOM_AI_1, CUSTOM_AI_2, CUSTOM_AI_3, UNDO, INCOGNITO, COPY, PASTE, PROOFREAD, TRANSLATE, TEXT_EDIT, AUTOCORRECT)
         // Tecla: o botão de IA vem primeiro; as teclas de IA próprias do LeanType ficam desligadas por padrão.
-        else -> listOf(TECLA_AI, SETTINGS, VOICE, CLIPBOARD, UNDO, INCOGNITO, TOUCHPAD, TEXT_EDIT, AUTOCORRECT, FLOATING, NUMPAD, COPY, PASTE, SELECT_ALL, SELECT_MODE, GIF, OCR, HANDWRITING)
+        // Tecla: barra enxuta por padrão; o resto se liga na tela do app ("Barra do teclado").
+        else -> listOf(TECLA_AI, VOICE, CLIPBOARD, UNDO)
     }
         
     val others = entries.filterNot { it in default || it in excludedKeys }

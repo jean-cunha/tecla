@@ -22,7 +22,9 @@ import br.com.palora.tecla.app.TeclaHome
 import br.com.palora.tecla.app.TeclaTheme
 import br.com.palora.tecla.app.TestState
 import br.com.palora.tecla.core.DefaultActions
+import br.com.palora.tecla.core.Exchange
 import br.com.palora.tecla.core.HistoryEntry
+import br.com.palora.tecla.core.Session
 import br.com.palora.tecla.core.Source
 import br.com.palora.tecla.core.SourceKind
 import br.com.palora.tecla.panel.PanelPalette
@@ -120,8 +122,17 @@ class TeclaScreenshotTest {
     }
 
     @Test
-    fun painel_sessao_cartao() = panel("painel-sessao-cartao") {
-        it.showPreview(PanelPalette.DARK, Source.NONE, prompt = "Viagem Chile", sessionCount = 5, sessionName = "Viagem Chile", sessionCard = true)
+    fun painel_sessoes_lista() = panel("painel-sessoes-lista") {
+        val now = System.currentTimeMillis()
+        it.showPreview(
+            PanelPalette.DARK, Source.NONE, prompt = "",
+            sessionCount = 5, sessionName = "Viagem Chile",
+            sessionsList = listOf(
+                Session("a", "Viagem Chile", now, now - 3_600_000, List(5) { Exchange(0, "", "", "") }),
+                Session("b", "Grupo da obra", now, now - 86_400_000, List(12) { Exchange(0, "", "", "") }),
+                Session("c", "Inglês", now, now - 3 * 86_400_000, emptyList()),
+            ),
+        )
     }
 
     @Test
@@ -172,7 +183,15 @@ class TeclaScreenshotTest {
         historyCount = if (ready) 12 else 0,
         preferClipboard = true,
         version = "1.0.0",
-        sessionCount = if (ready) 3 else -1,
+        sessions = if (ready) listOf(
+            br.com.palora.tecla.app.SessionInfo("a", "Viagem Chile", 5, System.currentTimeMillis()),
+            br.com.palora.tecla.app.SessionInfo("b", "Grupo da obra", 12, System.currentTimeMillis() - 86_400_000),
+        ) else emptyList(),
+        activeSessionId = if (ready) "a" else null,
+        barEnabled = br.com.palora.tecla.keyboard.KeyboardPrefs.Preset.ESSENCIAL.keys,
+        barPinned = br.com.palora.tecla.keyboard.KeyboardPrefs.Preset.ESSENCIAL.pinned,
+        glide = if (ready) br.com.palora.tecla.app.GlideState.Installed else br.com.palora.tecla.app.GlideState.NotInstalled,
+        voiceEnabled = ready,
     )
 
     @Test
@@ -186,13 +205,21 @@ class TeclaScreenshotTest {
 
     @Config(qualifiers = "w411dp-h2900dp-xxhdpi")
     @Test
+    fun app_aba_teclado() = screen("app-aba-teclado", dark = true, state = home(ready = true), tab = br.com.palora.tecla.app.HomeTab.TECLADO)
+
+    @Config(qualifiers = "w411dp-h1600dp-xxhdpi")
+    @Test
+    fun app_aba_sessoes() = screen("app-aba-sessoes", dark = true, state = home(ready = true), tab = br.com.palora.tecla.app.HomeTab.SESSOES)
+
+    @Config(qualifiers = "w411dp-h2900dp-xxhdpi")
+    @Test
     fun app_pagina_inteira() = screen("app-pagina-inteira", dark = true, state = home(ready = true))
 
-    private fun screen(name: String, dark: Boolean, state: HomeState) {
+    private fun screen(name: String, dark: Boolean, state: HomeState, tab: br.com.palora.tecla.app.HomeTab = br.com.palora.tecla.app.HomeTab.IA) {
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup().get()
         val view = ComposeView(activity)
         activity.setContentView(view)
-        view.setContent { TeclaTheme(dark = dark) { TeclaHome(state, HomeActions()) } }
+        view.setContent { TeclaTheme(dark = dark) { TeclaHome(state, HomeActions(), initialTab = tab) } }
         shadowOf(Looper.getMainLooper()).idle()
         save(activity.window.decorView, name)
     }

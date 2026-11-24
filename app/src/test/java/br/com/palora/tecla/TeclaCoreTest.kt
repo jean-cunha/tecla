@@ -6,7 +6,7 @@ package br.com.palora.tecla
 
 import br.com.palora.tecla.core.Exchange
 import br.com.palora.tecla.core.Prompts
-import br.com.palora.tecla.core.TeclaSession
+import br.com.palora.tecla.core.TeclaSessions
 import br.com.palora.tecla.core.Providers
 import br.com.palora.tecla.core.Source
 import br.com.palora.tecla.core.SourceKind
@@ -83,12 +83,12 @@ class TeclaCoreTest {
     @Test
     fun sessaoCortaAsTrocasMaisAntigas() {
         val all = (1..10).map { Exchange(it.toLong(), "x", "p".repeat(3000), "r".repeat(1000)) }
-        val fit = TeclaSession.fit(all, 16_000)
+        val fit = TeclaSessions.fit(all, 16_000)
         assertEquals(4, fit.size)
         assertEquals(7L, fit.first().time)
         assertEquals(10L, fit.last().time)
         // Uma troca grande demais sozinha ainda vai (é a mais recente).
-        assertEquals(1, TeclaSession.fit(listOf(Exchange(1, "x", "p".repeat(20_000), "r")), 16_000).size)
+        assertEquals(1, TeclaSessions.fit(listOf(Exchange(1, "x", "p".repeat(20_000), "r")), 16_000).size)
     }
 
     @Test
@@ -101,8 +101,8 @@ class TeclaCoreTest {
 
     @Test
     fun nomeDaSessaoLimpoECurto() {
-        assertEquals("Viagem Chile", TeclaSession.cleanName("  Viagem   Chile "))
-        assertEquals(TeclaSession.MAX_NAME, TeclaSession.cleanName("um nome comprido demais para o selo").length)
-        assertEquals(TeclaSession.DEFAULT_NAME, TeclaSession.cleanName("   "))
+        assertEquals("Viagem Chile", TeclaSessions.cleanName("  Viagem   Chile "))
+        assertEquals(TeclaSessions.MAX_NAME, TeclaSessions.cleanName("um nome comprido demais para o selo").length)
+        assertEquals(TeclaSessions.DEFAULT_NAME, TeclaSessions.cleanName("   "))
     }
 }

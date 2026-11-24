@@ -62,7 +62,9 @@ import androidx.compose.ui.window.Dialog
 import br.com.palora.tecla.core.Providers
 import br.com.palora.tecla.core.TeclaAction
 import br.com.palora.tecla.core.TeclaIcons
+import br.com.palora.tecla.keyboard.KeyboardPrefs
 import br.com.palora.tecla.panel.TeclaAiPanelView
+import helium314.keyboard.latin.utils.ToolbarKey
 import helium314.keyboard.latin.R
 
 sealed interface TestState {
@@ -71,6 +73,20 @@ sealed interface TestState {
     data class Ok(val ms: Long, val reply: String) : TestState
     data class Fail(val message: String) : TestState
 }
+
+data class SessionInfo(val id: String, val name: String, val count: Int, val updated: Long)
+
+/** Estado da instalação da digitação deslizando. */
+sealed interface GlideState {
+    data object NotInstalled : GlideState
+    data class Downloading(val percent: Int) : GlideState
+    data object Restarting : GlideState
+    data object Installed : GlideState
+    data object Unavailable : GlideState
+    data class Failed(val message: String) : GlideState
+}
+
+enum class HomeTab(val label: String) { IA("IA"), SESSOES("Sessões"), TECLADO("Teclado") }
 
 data class HomeState(
     val imeEnabled: Boolean,
@@ -90,10 +106,14 @@ data class HomeState(
     val historyCount: Int,
     val preferClipboard: Boolean,
     val version: String,
-    /** -1 = sem sessão de contexto ligada; senão, quantas trocas ela tem. */
-    val sessionCount: Int = -1,
-    val sessionTimeout: Int = 30,
-    val sessionName: String = br.com.palora.tecla.core.TeclaSession.DEFAULT_NAME,
+    val sessions: List<SessionInfo> = emptyList(),
+    val activeSessionId: String? = null,
+    val barEnabled: List<ToolbarKey> = emptyList(),
+    val barPinned: List<ToolbarKey> = emptyList(),
+    val toggles: Map<String, Boolean> = emptyMap(),
+    val glide: GlideState = GlideState.NotInstalled,
+    val glideEnabled: Boolean = true,
+    val voiceEnabled: Boolean = false,
 ) {
     val provider get() = Providers.byId(providerId)
     val aiReady get() = baseUrl.isNotBlank() && model.isNotBlank() && (apiKey.isNotBlank() || !provider.needsKey)
@@ -117,15 +137,30 @@ class HomeActions(
     val setHistoryEnabled: (Boolean) -> Unit = {},
     val clearHistory: () -> Unit = {},
     val setPreferClipboard: (Boolean) -> Unit = {},
-    val openKeyboardSettings: () -> Unit = {},
-    val setSessionTimeout: (Int) -> Unit = {},
-    val toggleSession: () -> Unit = {},
-    val renameSession: (String) -> Unit = {},
+    /** Abre uma tela das configurações do teclado (null = a principal). */
+    val openKeyboardScreen: (String?) -> Unit = {},
+    val selectSession: (String?) -> Unit = {},
+    val createSession: (String) -> Unit = {},
+    val renameSession: (String, String) -> Unit = {},
+    val deleteSession: (String) -> Unit = {},
+    val setBar: (List<ToolbarKey>, List<ToolbarKey>) -> Unit = { _, _ -> },
+    val applyPreset: (KeyboardPrefs.Preset) -> Unit = {},
+    val setToggle: (String, Boolean) -> Unit = { _, _ -> },
+    val installGlide: () -> Unit = {},
+    val setGlideEnabled: (Boolean) -> Unit = {},
+    val setVoice: (Boolean) -> Unit = {},
 )
 
 @Composable
-fun TeclaHome(state: HomeState, actions: HomeActions, initialModelPicker: Boolean = false, initialEditAction: Int? = null) {
+fun TeclaHome(
+    state: HomeState,
+    actions: HomeActions,
+    initialTab: HomeTab = HomeTab.IA,
+    initialModelPicker: Boolean = false,
+    initialEditAction: Int? = null,
+) {
     val c = LocalTecla.current
+    var tab by remember { mutableStateOf(initialTab) }
     var showModels by remember { mutableStateOf(initialModelPicker) }
     var editing by remember { mutableStateOf(initialEditAction) }
 
@@ -141,40 +176,61 @@ fun TeclaHome(state: HomeState, actions: HomeActions, initialModelPicker: Boolea
             Hero()
             Spacer(Modifier.height(14.dp))
             if (state.allReady) ReadyBanner() else SetupCard(state, actions)
+            Spacer(Modifier.height(20.dp))
+            Tabs(tab) { tab = it }
 
-            SectionTitle("Inteligência artificial")
-            AiCard(state, actions, openModels = { showModels = true; if (state.models.isEmpty()) actions.loadModels() })
+            when (tab) {
+                HomeTab.IA -> {
+                    SectionTitle("Inteligência artificial")
+                    AiCard(state, actions, openModels = { showModels = true; if (state.models.isEmpty()) actions.loadModels() })
 
-            SectionTitle("Sessão de contexto")
-            SessionCard(state, actions)
+                    SectionTitle("Ações rápidas")
+                    ActionsCard(state.actions, onEdit = { editing = it }, onAdd = { editing = -1 }, onMove = { from, to ->
+                        val list = state.actions.toMutableList()
+                        if (to in list.indices) {
+                            val item = list.removeAt(from)
+                            list.add(to, item)
+                            actions.saveActions(list)
+                        }
+                    }, onReset = actions.resetActions)
 
-            SectionTitle("Ações rápidas")
-            ActionsCard(state.actions, onEdit = { editing = it }, onAdd = { editing = -1 }, onMove = { from, to ->
-                val list = state.actions.toMutableList()
-                if (to in list.indices) {
-                    val item = list.removeAt(from)
-                    list.add(to, item)
-                    actions.saveActions(list)
+                    SectionTitle("Sobre você")
+                    PersonalCard(state.personal, actions.setPersonal)
+
+                    SectionTitle("Experimente")
+                    TryCard()
+
+                    SectionTitle("Privacidade")
+                    PrivacyCard(state, actions)
                 }
-            }, onReset = actions.resetActions)
+                HomeTab.SESSOES -> {
+                    SectionTitle("Sessões")
+                    SessionsCard(state, actions)
+                }
+                HomeTab.TECLADO -> {
+                    SectionTitle("Barra do teclado")
+                    BarCard(state, actions)
 
-            SectionTitle("Sobre você")
-            PersonalCard(state.personal, actions.setPersonal)
+                    SectionTitle("Digitar deslizando")
+                    GlideCard(state, actions)
 
-            SectionTitle("Experimente")
-            TryCard()
+                    SectionTitle("Falar em vez de digitar")
+                    VoiceCard(state, actions)
 
-            SectionTitle("Privacidade")
-            PrivacyCard(state, actions)
+                    SectionTitle("Digitação")
+                    Card(padding = 12.dp) {
+                        KeyboardPrefs.toggles.forEach { t ->
+                            ToggleRow(t.label, t.description, state.toggles[t.pref] ?: t.default) { actions.setToggle(t.pref, it) }
+                        }
+                    }
 
-            SectionTitle("Teclado")
-            Card {
-                LinkRow(
-                    icon = R.drawable.tecla_ic_keyboard,
-                    title = "Configurações do teclado",
-                    subtitle = "Temas, idiomas, layout, digitação por gesto e a barra de ferramentas.",
-                    onClick = actions.openKeyboardSettings,
-                )
+                    SectionTitle("Mais opções")
+                    Card(padding = 12.dp) {
+                        LinkRow(R.drawable.tecla_ic_translate, "Idiomas e dicionários", "Português, outros idiomas e o arquivo .dict", onClick = { actions.openKeyboardScreen("languages") })
+                        LinkRow(R.drawable.tecla_ic_tune, "Aparência", "Tema, cores, altura e formato das teclas", onClick = { actions.openKeyboardScreen("appearance") })
+                        LinkRow(R.drawable.tecla_ic_keyboard, "Todas as configurações", "Tudo o que o teclado tem, para quem quer mexer em detalhe", onClick = { actions.openKeyboardScreen(null) })
+                    }
+                }
             }
 
             Text(
@@ -207,6 +263,25 @@ fun TeclaHome(state: HomeState, actions: HomeActions, initialModelPicker: Boolea
                 }
             } else null,
         )
+    }
+}
+
+@Composable
+private fun Tabs(selected: HomeTab, onSelect: (HomeTab) -> Unit) {
+    val c = LocalTecla.current
+    Row(
+        Modifier.fillMaxWidth().clip(CircleShape).background(c.surface).border(1.dp, c.outline, CircleShape).padding(4.dp),
+    ) {
+        HomeTab.entries.forEach { t ->
+            val on = t == selected
+            Box(
+                Modifier.weight(1f).clip(CircleShape).background(if (on) c.accent else Color.Transparent)
+                    .clickable { onSelect(t) }.padding(vertical = 11.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(t.label, style = TeclaType.label, color = if (on) c.onAccent else c.muted)
+            }
+        }
     }
 }
 
@@ -611,71 +686,298 @@ private fun ActionEditor(initial: TeclaAction?, onDismiss: () -> Unit, onSave: (
 // ------------------------------------------------------------------------- outras seções
 
 @Composable
-private fun SessionCard(state: HomeState, actions: HomeActions) {
+private fun SessionsCard(state: HomeState, actions: HomeActions) {
     val c = LocalTecla.current
-    val active = state.sessionCount >= 0
+    var newName by remember { mutableStateOf("") }
+    var renaming by remember { mutableStateOf<SessionInfo?>(null) }
+    var deleting by remember { mutableStateOf<SessionInfo?>(null) }
+    Card(padding = 12.dp) {
+        Text(
+            "Cada sessão é uma conversa salva: você pergunta X, depois Y, depois Z, e quando volta nela a IA " +
+                "já sabe o contexto. Só a IA lê as trocas antigas. Nada é criado nem apagado sozinho.",
+            style = TeclaType.small, color = c.muted, modifier = Modifier.padding(start = 6.dp, end = 6.dp, top = 6.dp, bottom = 10.dp),
+        )
+        SessionRow(null, "Sem sessão", "Cada pedido começa do zero", state.activeSessionId == null, actions, {}, {})
+        state.sessions.forEach { s ->
+            val trocas = when (s.count) { 0 -> "nenhuma troca"; 1 -> "1 troca"; else -> "${s.count} trocas" }
+            val dia = java.text.DateFormat.getDateInstance(java.text.DateFormat.SHORT).format(java.util.Date(s.updated))
+            SessionRow(s, s.name, "$trocas · $dia", s.id == state.activeSessionId, actions, { renaming = s }, { deleting = s })
+        }
+        FieldLabel("Nova sessão", top = 16.dp)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f)) {
+                TeclaField(
+                    value = newName,
+                    onChange = { newName = it.take(br.com.palora.tecla.core.TeclaSessions.MAX_NAME) },
+                    placeholder = "Ex.: Viagem Chile",
+                    trailing = {
+                        Text("${newName.length}/${br.com.palora.tecla.core.TeclaSessions.MAX_NAME}", style = TeclaType.small, color = c.muted, modifier = Modifier.padding(end = 10.dp))
+                    },
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            PillButton("Criar", primary = true, icon = R.drawable.tecla_ic_add) {
+                actions.createSession(newName)
+                newName = ""
+            }
+        }
+        Text(
+            "Vão junto as trocas mais recentes da sessão, até cerca de 20 mil caracteres por pedido. " +
+                "No teclado, o botão de balões abre esta mesma lista.",
+            style = TeclaType.small, color = c.muted, modifier = Modifier.padding(start = 6.dp, end = 6.dp, top = 10.dp),
+        )
+    }
+    renaming?.let { s ->
+        NameDialog(
+            title = "Renomear sessão", initial = s.name,
+            onDismiss = { renaming = null },
+            onSave = { actions.renameSession(s.id, it); renaming = null },
+        )
+    }
+    deleting?.let { s ->
+        Dialog(onDismissRequest = { deleting = null }) {
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(c.surface)
+                    .border(1.dp, c.outline, RoundedCornerShape(28.dp)).padding(20.dp)
+            ) {
+                Text("Apagar \"${s.name}\"?", style = TeclaType.title, color = c.text)
+                Text(
+                    "As ${s.count} trocas dela somem e a IA esquece esse contexto. Não dá para desfazer.",
+                    style = TeclaType.small, color = c.muted, modifier = Modifier.padding(top = 6.dp),
+                )
+                Row(Modifier.fillMaxWidth().padding(top = 20.dp), horizontalArrangement = Arrangement.End) {
+                    PillButton("Cancelar", primary = false) { deleting = null }
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "Apagar", style = TeclaType.label, color = Color.White,
+                        modifier = Modifier.clip(CircleShape).background(c.error)
+                            .clickable { actions.deleteSession(s.id); deleting = null }
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SessionRow(
+    s: SessionInfo?,
+    title: String,
+    subtitle: String,
+    selected: Boolean,
+    actions: HomeActions,
+    onRename: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val c = LocalTecla.current
+    val fg = if (selected) c.onAccentSoft else c.text
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 3.dp).clip(RoundedCornerShape(16.dp))
+            .background(if (selected) c.accentSoft else Color.Transparent)
+            .clickable { actions.selectSession(s?.id) }
+            .padding(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(20.dp).clip(CircleShape).border(2.dp, if (selected) c.accent else c.muted, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (selected) Box(Modifier.size(10.dp).clip(CircleShape).background(c.accent))
+        }
+        Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+            Text(title, style = TeclaType.bodyStrong, color = fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(subtitle, style = TeclaType.small, color = if (selected) c.onAccentSoft else c.muted)
+        }
+        if (s != null) {
+            SmallIcon(R.drawable.tecla_ic_pencil, "Renomear ${s.name}", enabled = true, onClick = onRename)
+            SmallIcon(R.drawable.tecla_ic_delete, "Apagar ${s.name}", enabled = true, onClick = onDelete)
+        }
+    }
+}
+
+@Composable
+private fun NameDialog(title: String, initial: String, onDismiss: () -> Unit, onSave: (String) -> Unit) {
+    val c = LocalTecla.current
+    var name by remember { mutableStateOf(initial) }
+    val max = br.com.palora.tecla.core.TeclaSessions.MAX_NAME
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(c.surface)
+                .border(1.dp, c.outline, RoundedCornerShape(28.dp)).padding(20.dp)
+        ) {
+            Text(title, style = TeclaType.title, color = c.text)
+            Spacer(Modifier.height(14.dp))
+            TeclaField(
+                value = name, onChange = { name = it.take(max) }, placeholder = "Nome",
+                trailing = { Text("${name.length}/$max", style = TeclaType.small, color = c.muted, modifier = Modifier.padding(end = 10.dp)) },
+            )
+            Row(Modifier.fillMaxWidth().padding(top = 20.dp), horizontalArrangement = Arrangement.End) {
+                PillButton("Cancelar", primary = false, onClick = onDismiss)
+                Spacer(Modifier.width(8.dp))
+                PillButton("Salvar", primary = true) { onSave(name) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BarCard(state: HomeState, actions: HomeActions) {
+    val c = LocalTecla.current
+    Card(padding = 12.dp) {
+        Text(
+            "Escolha o que aparece na barra em cima do teclado. Os marcados com o alfinete ficam sempre à vista " +
+                "(até ${KeyboardPrefs.MAX_PINNED}); os outros aparecem ao tocar na seta da barra.",
+            style = TeclaType.small, color = c.muted, modifier = Modifier.padding(start = 6.dp, end = 6.dp, top = 6.dp, bottom = 10.dp),
+        )
+        Row(Modifier.padding(horizontal = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            KeyboardPrefs.Preset.entries.forEach { p ->
+                val on = state.barEnabled.toSet() == p.keys.toSet()
+                Text(
+                    p.label, style = TeclaType.label, color = if (on) c.onAccent else c.text,
+                    modifier = Modifier.clip(CircleShape).background(if (on) c.accent else c.surfaceHigh)
+                        .clickable { actions.applyPreset(p) }.padding(horizontal = 14.dp, vertical = 9.dp),
+                )
+            }
+        }
+        Text(
+            "${state.barEnabled.size} botões na barra · ${state.barPinned.size} sempre à vista",
+            style = TeclaType.label, color = c.text, modifier = Modifier.padding(start = 6.dp, top = 14.dp, bottom = 4.dp),
+        )
+        KeyboardPrefs.catalog.forEach { item ->
+            val on = item.key in state.barEnabled
+            val pinned = item.key in state.barPinned
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
+                    .clickable {
+                        val enabled = if (on) state.barEnabled - item.key else state.barEnabled + item.key
+                        actions.setBar(enabled, state.barPinned.filter { it in enabled })
+                    }
+                    .padding(start = 6.dp, top = 6.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    Modifier.size(36.dp).clip(CircleShape).background(if (on) c.accentSoft else c.surfaceHigh),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(painterResource(item.icon), null, tint = if (on) c.onAccentSoft else c.muted, modifier = Modifier.size(19.dp))
+                }
+                Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                    Text(item.label, style = TeclaType.bodyStrong, color = if (on) c.text else c.muted)
+                    Text(item.description, style = TeclaType.small, color = c.muted)
+                }
+                if (on) {
+                    val canPin = pinned || state.barPinned.size < KeyboardPrefs.MAX_PINNED
+                    Box(
+                        Modifier.size(36.dp).clip(CircleShape).background(if (pinned) c.accent else Color.Transparent)
+                            .clickable(enabled = canPin) {
+                                val pins = if (pinned) state.barPinned - item.key else state.barPinned + item.key
+                                actions.setBar(state.barEnabled, pins)
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            painterResource(R.drawable.tecla_ic_pin), if (pinned) "Tirar de sempre à vista" else "Deixar sempre à vista",
+                            tint = when { pinned -> c.onAccent; canPin -> c.muted; else -> c.outline },
+                            modifier = Modifier.size(17.dp),
+                        )
+                    }
+                }
+                Switch(
+                    checked = on,
+                    onCheckedChange = { checked ->
+                        val enabled = if (checked) state.barEnabled + item.key else state.barEnabled - item.key
+                        actions.setBar(enabled, state.barPinned.filter { it in enabled })
+                    },
+                    modifier = Modifier.padding(start = 4.dp, end = 4.dp),
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = c.onAccent, checkedTrackColor = c.accent, checkedBorderColor = c.accent,
+                        uncheckedThumbColor = c.muted, uncheckedTrackColor = c.surfaceHigh, uncheckedBorderColor = c.outline,
+                    ),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun GlideCard(state: HomeState, actions: HomeActions) {
+    val c = LocalTecla.current
     Card {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(40.dp).clip(CircleShape).background(if (active) c.accentSoft else c.surfaceHigh), contentAlignment = Alignment.Center) {
-                Icon(painterResource(R.drawable.tecla_ic_session), null, tint = if (active) c.onAccentSoft else c.muted, modifier = Modifier.size(20.dp))
+            Box(Modifier.size(40.dp).clip(CircleShape).background(c.accentSoft), contentAlignment = Alignment.Center) {
+                Icon(painterResource(R.drawable.tecla_ic_swipe), null, tint = c.onAccentSoft, modifier = Modifier.size(20.dp))
             }
             Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                Text("Deslizar o dedo para formar palavras", style = TeclaType.bodyStrong, color = c.text)
+                Text(
+                    when (val g = state.glide) {
+                        GlideState.Installed -> if (state.glideEnabled) "Ligado" else "Desligado"
+                        GlideState.NotInstalled -> "Precisa baixar um arquivo de 1 a 3 MB, uma vez só"
+                        is GlideState.Downloading -> "Baixando… ${g.percent}%"
+                        GlideState.Restarting -> "Pronto! O teclado vai reiniciar"
+                        GlideState.Unavailable -> "Não disponível para o processador deste celular"
+                        is GlideState.Failed -> "Não deu: ${g.message}"
+                    },
+                    style = TeclaType.small, color = if (state.glide is GlideState.Failed) c.error else c.muted,
+                )
+            }
+            when (state.glide) {
+                GlideState.Installed -> Switch(
+                    checked = state.glideEnabled, onCheckedChange = actions.setGlideEnabled,
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = c.onAccent, checkedTrackColor = c.accent, checkedBorderColor = c.accent,
+                        uncheckedThumbColor = c.muted, uncheckedTrackColor = c.surfaceHigh, uncheckedBorderColor = c.outline,
+                    ),
+                )
+                GlideState.NotInstalled, is GlideState.Failed -> PillButton("Ativar", primary = true, onClick = actions.installGlide)
+                is GlideState.Downloading, GlideState.Restarting -> CircularProgressIndicator(Modifier.size(22.dp), color = c.accent, strokeWidth = 2.5.dp)
+                GlideState.Unavailable -> Unit
+            }
+        }
+        if (state.glide == GlideState.NotInstalled || state.glide is GlideState.Failed) {
+            Text(
+                "O deslizar usa a biblioteca de gestos do Google, que não pode vir dentro do app. O Tecla baixa a mesma " +
+                    "que o LeanType usa e confere se o arquivo é o certo antes de instalar.",
+                style = TeclaType.small, color = c.muted, modifier = Modifier.padding(top = 12.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun VoiceCard(state: HomeState, actions: HomeActions) {
+    val c = LocalTecla.current
+    val supported = KeyboardPrefs.voiceSupported(state.providerId)
+    Card {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(40.dp).clip(CircleShape).background(c.accentSoft), contentAlignment = Alignment.Center) {
+                Icon(painterResource(R.drawable.sym_keyboard_voice_rounded), null, tint = c.onAccentSoft, modifier = Modifier.size(20.dp))
+            }
+            Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                Text("Digitar falando", style = TeclaType.bodyStrong, color = c.text)
                 Text(
                     when {
-                        !active -> "Desligada"
-                        state.sessionCount == 0 -> "${state.sessionName} · sem trocas"
-                        state.sessionCount == 1 -> "${state.sessionName} · 1 troca"
-                        else -> "${state.sessionName} · ${state.sessionCount} trocas"
+                        !supported -> "Funciona com OpenAI, Gemini ou Groq (troque na aba IA)"
+                        state.apiKey.isBlank() -> "Coloque a chave da API na aba IA primeiro"
+                        state.voiceEnabled -> "Ligado · usa a mesma chave da IA"
+                        else -> "Usa a mesma chave da IA, sem plugin"
                     },
-                    style = TeclaType.bodyStrong, color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    if (active) "Os próximos pedidos levam o que já foi falado." else "Cada pedido começa do zero.",
                     style = TeclaType.small, color = c.muted,
                 )
             }
-            PillButton(if (active) "Encerrar" else "Iniciar", primary = !active, onClick = actions.toggleSession)
-        }
-        if (active) {
-            FieldLabel("Nome (até ${br.com.palora.tecla.core.TeclaSession.MAX_NAME} caracteres)", top = 16.dp)
-            var name by remember { mutableStateOf(state.sessionName) }
-            TeclaField(
-                value = name,
-                onChange = {
-                    name = it.take(br.com.palora.tecla.core.TeclaSession.MAX_NAME)
-                    actions.renameSession(name)
-                },
-                placeholder = br.com.palora.tecla.core.TeclaSession.DEFAULT_NAME,
-                trailing = {
-                    Text(
-                        "${name.length}/${br.com.palora.tecla.core.TeclaSession.MAX_NAME}",
-                        style = TeclaType.small, color = c.muted, modifier = Modifier.padding(end = 10.dp),
-                    )
-                },
+            Switch(
+                checked = state.voiceEnabled, enabled = supported && state.apiKey.isNotBlank(), onCheckedChange = actions.setVoice,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = c.onAccent, checkedTrackColor = c.accent, checkedBorderColor = c.accent,
+                    uncheckedThumbColor = c.muted, uncheckedTrackColor = c.surfaceHigh, uncheckedBorderColor = c.outline,
+                ),
             )
         }
         Text(
-            "Com a sessão ligada, a IA lembra das últimas trocas, mesmo em outro app: dá para pedir \"responde ele\" " +
-                "ou \"traduz de volta\" sem copiar de novo. No painel do teclado, o botão de balões liga a sessão e um toque no selo dela renomeia ou encerra.",
-            style = TeclaType.small, color = c.muted, modifier = Modifier.padding(top = 14.dp),
-        )
-        FieldLabel("Encerrar sozinha depois de", top = 16.dp)
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            br.com.palora.tecla.core.TeclaSession.timeoutOptions.forEach { (minutes, label) ->
-                val selected = minutes == state.sessionTimeout
-                Text(
-                    label, style = TeclaType.label,
-                    color = if (selected) c.onAccentSoft else c.muted,
-                    modifier = Modifier.clip(CircleShape)
-                        .background(if (selected) c.accentSoft else c.surfaceHigh)
-                        .clickable { actions.setSessionTimeout(minutes) }
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                )
-            }
-        }
-        Text(
-            "Vão junto as trocas mais recentes, até cerca de 16 mil caracteres. Quanto maior a sessão, mais tokens por pedido.",
-            style = TeclaType.small, color = c.muted, modifier = Modifier.padding(top = 10.dp),
+            "Toque no microfone da barra, fale e toque de novo: o áudio vai para o provedor e volta como texto. " +
+                "Na primeira vez o Android pede permissão do microfone.",
+            style = TeclaType.small, color = c.muted, modifier = Modifier.padding(top = 12.dp),
         )
     }
 }

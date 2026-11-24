@@ -76,14 +76,15 @@ object Prompts {
     }
 
     private const val SESSION_NOTE =
-        "\n\nEsta conversa é uma sessão: as mensagens anteriores são pedidos e respostas desta mesma pessoa, " +
-            "feitos agora há pouco, talvez em outros aplicativos. Use esse contexto quando o pedido atual depender dele " +
-            "(\"responde ele\", \"traduz de volta\", \"o mesmo de antes\"), e ignore quando não tiver relação."
+        "\n\nEsta conversa é uma sessão que a pessoa criou e retomou: as mensagens anteriores são pedidos e " +
+            "respostas dela, feitos antes (às vezes em outros aplicativos ou em outro dia). Use esse contexto para " +
+            "entender o pedido atual e entregar o que ela espera (\"responde ele\", \"faz igual o de antes\", " +
+            "\"agora em inglês\"), e ignore o que não tiver relação."
 
     /** Versão curta do pedido para guardar na sessão: o texto de apoio antigo não precisa ir inteiro. */
     fun userForHistory(instruction: String, source: Source): String {
-        val shortSource = if (source.text.length > TeclaSession.MAX_SOURCE_IN_HISTORY) {
-            source.copy(text = source.text.take(TeclaSession.MAX_SOURCE_IN_HISTORY) + " […]")
+        val shortSource = if (source.text.length > TeclaSessions.MAX_SOURCE_IN_HISTORY) {
+            source.copy(text = source.text.take(TeclaSessions.MAX_SOURCE_IN_HISTORY) + " […]")
         } else source
         return firstUser(instruction, shortSource)
     }
