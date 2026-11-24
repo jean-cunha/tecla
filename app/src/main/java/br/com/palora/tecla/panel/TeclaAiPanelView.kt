@@ -60,8 +60,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.launch
-import java.text.DateFormat
-import java.util.Date
 import kotlin.math.min
 
 /**
@@ -770,11 +768,10 @@ class TeclaAiPanelView @JvmOverloads constructor(
         }
         val col = LinearLayout(context).apply { orientation = VERTICAL }
         col.addView(sessionRow(null, "Sem sessão", "Cada pedido começa do zero", activeId == null))
-        val fmt = DateFormat.getDateInstance(DateFormat.SHORT)
         list.forEach { item ->
             val n = item.exchanges.size
             val trocas = when (n) { 0 -> "nenhuma troca"; 1 -> "1 troca"; else -> "$n trocas" }
-            col.addView(sessionRow(item, item.name, "$trocas · ${fmt.format(Date(item.updated))}", item.id == activeId))
+            col.addView(sessionRow(item, item.name, "$trocas · ${TeclaSessions.whenLabel(item.updated)}", item.id == activeId))
         }
         if (list.isEmpty()) {
             col.addView(text("Crie uma sessão para cada assunto. A IA lembra do que já foi falado nela, mesmo dias depois.", 13.5f, palette.muted).apply {
@@ -1003,8 +1000,6 @@ class TeclaAiPanelView @JvmOverloads constructor(
             })
             col.addView(empty)
         }
-        val fmt = DateFormat.getTimeInstance(DateFormat.SHORT)
-        val dayFmt = DateFormat.getDateInstance(DateFormat.SHORT)
         entries.forEach { e ->
             val item = LinearLayout(context).apply {
                 orientation = VERTICAL
@@ -1013,8 +1008,7 @@ class TeclaAiPanelView @JvmOverloads constructor(
                 layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(6) }
                 setOnClickListener { openHistory(e) }
             }
-            val sameDay = System.currentTimeMillis() - e.time < 20 * 3600_000L
-            val whenText = if (sameDay) fmt.format(Date(e.time)) else dayFmt.format(Date(e.time))
+            val whenText = TeclaSessions.whenLabel(e.time)
             item.addView(text("${e.action}  ·  $whenText", 12.5f, palette.muted, bold = true).apply {
                 maxLines = 1
                 ellipsize = TextUtils.TruncateAt.END

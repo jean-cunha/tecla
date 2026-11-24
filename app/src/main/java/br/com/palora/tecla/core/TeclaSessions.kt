@@ -147,6 +147,21 @@ class TeclaSessions(context: Context) {
         /** Teto de contexto enviado por pedido: as trocas mais antigas ficam de fora primeiro. */
         const val MAX_CONTEXT_CHARS = 20_000
 
+        /** "hoje 14:30", "ontem", "24/11" ou "24/11/25": sempre no formato brasileiro. */
+        fun whenLabel(time: Long, now: Long = System.currentTimeMillis()): String {
+            val zone = java.time.ZoneId.systemDefault()
+            val t = java.time.Instant.ofEpochMilli(time).atZone(zone)
+            val today = java.time.Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
+            val day = t.toLocalDate()
+            fun two(n: Int) = n.toString().padStart(2, '0')
+            return when {
+                day == today -> "hoje ${two(t.hour)}:${two(t.minute)}"
+                day == today.minusDays(1) -> "ontem"
+                day.year == today.year -> "${two(day.dayOfMonth)}/${two(day.monthValue)}"
+                else -> "${two(day.dayOfMonth)}/${two(day.monthValue)}/${two(day.year % 100)}"
+            }
+        }
+
         fun cleanName(raw: String): String = raw.replace(Regex("\\s+"), " ").trim().take(MAX_NAME).ifBlank { DEFAULT_NAME }
 
         /** As trocas mais recentes que cabem no teto, na ordem em que aconteceram. */

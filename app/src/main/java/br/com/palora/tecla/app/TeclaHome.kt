@@ -700,7 +700,7 @@ private fun SessionsCard(state: HomeState, actions: HomeActions) {
         SessionRow(null, "Sem sessão", "Cada pedido começa do zero", state.activeSessionId == null, actions, {}, {})
         state.sessions.forEach { s ->
             val trocas = when (s.count) { 0 -> "nenhuma troca"; 1 -> "1 troca"; else -> "${s.count} trocas" }
-            val dia = java.text.DateFormat.getDateInstance(java.text.DateFormat.SHORT).format(java.util.Date(s.updated))
+            val dia = br.com.palora.tecla.core.TeclaSessions.whenLabel(s.updated)
             SessionRow(s, s.name, "$trocas · $dia", s.id == state.activeSessionId, actions, { renaming = s }, { deleting = s })
         }
         FieldLabel("Nova sessão", top = 16.dp)

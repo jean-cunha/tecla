@@ -105,4 +105,16 @@ class TeclaCoreTest {
         assertEquals(TeclaSessions.MAX_NAME, TeclaSessions.cleanName("um nome comprido demais para o selo").length)
         assertEquals(TeclaSessions.DEFAULT_NAME, TeclaSessions.cleanName("   "))
     }
+
+    @Test
+    fun data_das_sessoes_no_formato_brasileiro() {
+        val zone = java.time.ZoneId.systemDefault()
+        fun at(y: Int, m: Int, d: Int, h: Int = 12, min: Int = 0) =
+            java.time.LocalDateTime.of(y, m, d, h, min).atZone(zone).toInstant().toEpochMilli()
+        val now = at(2026, 11, 24, 15, 0)
+        assertEquals("hoje 09:05", TeclaSessions.whenLabel(at(2026, 11, 24, 9, 5), now))
+        assertEquals("ontem", TeclaSessions.whenLabel(at(2026, 11, 23), now))
+        assertEquals("03/02", TeclaSessions.whenLabel(at(2026, 2, 3), now))
+        assertEquals("24/11/25", TeclaSessions.whenLabel(at(2025, 11, 24), now))
+    }
 }
