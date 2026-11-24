@@ -72,7 +72,8 @@ jobs:
 
       - name: Resumo dos erros (testes)
         if: steps.testes.outcome == 'failure'
-        run: grep -E '^e: |^w: .*(error|unresolved)|FAILED|Execution failed for task|Exception|expected' test.log | head -150 || true
+        run: |
+          grep -E '^e: |^w: .*(error|unresolved)|FAILED|Execution failed for task|Exception|expected' test.log | head -150 || true
 
       - name: Capturas na branch "capturas"
         if: always()
@@ -100,7 +101,8 @@ jobs:
 
       - name: Resumo dos erros (APK)
         if: failure()
-        run: grep -E '^e: |^w: .*(error|unresolved)|FAILED|Execution failed for task|ERROR|error:' build.log | head -150 || true
+        run: |
+          grep -E '^e: |^w: .*(error|unresolved)|FAILED|Execution failed for task|ERROR|error:' build.log | head -150 || true
 
       - name: Publicar o APK numa Release
         env:
