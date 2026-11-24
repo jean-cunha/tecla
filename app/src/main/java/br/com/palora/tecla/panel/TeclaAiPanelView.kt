@@ -728,7 +728,12 @@ class TeclaAiPanelView @JvmOverloads constructor(
         card.addView(row)
 
         val preview = if (source.kind == SourceKind.NONE) {
-            text("A IA responde só ao que você escrever abaixo.", 13.5f, palette.muted)
+            val withSession = sessionCount() > 0
+            text(
+                if (withSession) "Sem texto de apoio: vai o seu pedido e o contexto da sessão."
+                else "A IA responde só ao que você escrever abaixo.",
+                13.5f, palette.muted,
+            )
         } else {
             text(source.text.trim().replace(Regex("\\s+"), " "), 14f, ColorUtils.setAlphaComponent(palette.text, 225)).apply {
                 maxLines = 2
