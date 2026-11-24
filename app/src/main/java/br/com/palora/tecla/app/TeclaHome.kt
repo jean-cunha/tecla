@@ -141,7 +141,7 @@ class HomeActions(
     val openKeyboardScreen: (String?) -> Unit = {},
     val selectSession: (String?) -> Unit = {},
     val createSession: (String) -> Unit = {},
-    val renameSession: (String, String) -> Unit = {},
+    val renameSession: (String, String) -> Unit = { _, _ -> },
     val deleteSession: (String) -> Unit = {},
     val setBar: (List<ToolbarKey>, List<ToolbarKey>) -> Unit = { _, _ -> },
     val applyPreset: (KeyboardPrefs.Preset) -> Unit = {},
