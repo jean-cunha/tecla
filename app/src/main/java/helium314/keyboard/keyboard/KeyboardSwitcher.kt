@@ -1,0 +1,1520 @@
+/*
+ * Copyright (C) 2008 The Android Open Source Project
+ * modified
+ * SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-only
+ */
+
+package helium314.keyboard.keyboard
+
+import android.annotation.SuppressLint
+import android.content.Context
+import android.content.SharedPreferences
+import android.content.res.Configuration
+import android.content.res.Resources
+import android.graphics.drawable.Drawable
+import android.os.Build
+import android.view.ContextThemeWrapper
+import android.view.Gravity
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
+import android.view.animation.AnimationUtils
+import android.view.animation.PathInterpolator
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodSubtype
+import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
+import android.widget.LinearLayout
+import android.widget.TextView
+import android.widget.Toast
+import helium314.keyboard.compat.isDeviceLocked
+import helium314.keyboard.event.Event
+import helium314.keyboard.keyboard.KeyboardLayoutSet.KeyboardLayoutSetException
+import helium314.keyboard.keyboard.clipboard.ClipboardHistoryView
+import helium314.keyboard.keyboard.emoji.EmojiCategory
+import helium314.keyboard.latin.style.StylePreviewStripView
+import helium314.keyboard.keyboard.emoji.EmojiPalettesView
+import helium314.keyboard.keyboard.internal.KeyboardState
+import helium314.keyboard.latin.FloatingKeyboardManager
+import helium314.keyboard.latin.InputView
+import helium314.keyboard.latin.KeyboardWrapperView
+import helium314.keyboard.latin.LastComposedWord
+import helium314.keyboard.latin.LatinIME
+import helium314.keyboard.latin.R
+import helium314.keyboard.latin.RichInputMethodManager
+import helium314.keyboard.latin.RichInputMethodSubtype
+import helium314.keyboard.latin.WordComposer
+import helium314.keyboard.latin.common.ColorType
+import helium314.keyboard.latin.handwriting.HandwritingLoader
+import helium314.keyboard.latin.handwriting.HandwritingView
+import helium314.keyboard.latin.ocr.OcrCameraView
+import helium314.keyboard.latin.ocr.OcrResultView
+import helium314.keyboard.latin.settings.Settings
+import helium314.keyboard.latin.cjk.CjkCandidateStripView
+import helium314.keyboard.latin.cjk.CjkInputManager
+import helium314.keyboard.latin.settings.SettingsValues
+import helium314.keyboard.latin.suggestions.SuggestionStripView
+import helium314.keyboard.latin.utils.CapsModeUtils
+import helium314.keyboard.latin.utils.LanguageOnSpacebarUtils
+import helium314.keyboard.latin.utils.Log
+import helium314.keyboard.latin.utils.RecapitalizeMode
+import helium314.keyboard.latin.utils.ResourceUtils
+import helium314.keyboard.latin.utils.ScreenProfileProvider
+import helium314.keyboard.latin.utils.ScriptUtils
+import helium314.keyboard.latin.utils.SubtypeUtilsAdditional
+import helium314.keyboard.latin.utils.ToolbarMode
+import helium314.keyboard.latin.utils.InputTypeUtils
+import helium314.keyboard.latin.utils.prefs
+
+private val VIEW_SWITCH_ENTER_INTERPOLATOR = PathInterpolator(0.05f, 0.7f, 0.1f, 1.0f)
+
+class KeyboardSwitcher private constructor() : KeyboardState.SwitchActions {
+
+    private var mCurrentInputView: InputView? = null
+    private var mKeyboardViewWrapper: KeyboardWrapperView? = null
+    private var mMainKeyboardFrame: View? = null
+    private var mKeyboardView: MainKeyboardView? = null
+    private var mEmojiPalettesView: EmojiPalettesView? = null
+    private var mEmojiTabStripView: LinearLayout? = null
+    private var mEmojiTabStripScrollView: HorizontalScrollView? = null
+    private var mClipboardStripView: LinearLayout? = null
+    private var mClipboardStripScrollView: HorizontalScrollView? = null
+    private var mClipboardEditStripView: LinearLayout? = null
+    private var mOcrStripView: LinearLayout? = null
+    private var mOcrStripScrollView: HorizontalScrollView? = null
+    private var mSuggestionStripView: SuggestionStripView? = null
+    private var mCjkCandidateStripView: CjkCandidateStripView? = null
+    private var mStylePreviewStripView: StylePreviewStripView? = null
+    private var mStripContainer: LinearLayout? = null
+    private var mClipboardHistoryView: ClipboardHistoryView? = null
+    private var mHandwritingView: HandwritingView? = null
+    private var mOcrCameraView: OcrCameraView? = null
+    private var mOcrResultView: OcrResultView? = null
+    private var mTouchpadView: TouchpadView? = null
+    private var mGifPickerView: helium314.keyboard.latin.gif.GifPickerView? = null
+    var editorSession: Long = 1L
+        private set
+    private var mFakeToastView: TextView? = null
+    private var mLatinIME: LatinIME? = null
+    private var mRichImm: RichInputMethodManager? = null
+    private var mIsHardwareAcceleratedDrawingEnabled: Boolean = false
+
+    private var mState: KeyboardState? = null
+    private var mKeyboardLayoutSet: KeyboardLayoutSet? = null
+
+    private var mKeyboardTheme: KeyboardTheme? = null
+    private var mThemeContext: Context? = null
+    private var mCurrentUiMode: Int = 0
+    private var mCurrentOrientation: Int = 0
+    private var mCurrentDpi: Int = 0
+    private var mThemeNeedsReload: Boolean = false
+
+    val latinIME: LatinIME? get() = mLatinIME
+
+    private fun initInternal(latinIme: LatinIME) {
+        mLatinIME = latinIme
+        mRichImm = RichInputMethodManager.getInstance()
+        mState = KeyboardState(this)
+        mIsHardwareAcceleratedDrawingEnabled = latinIme.enableHardwareAcceleration()
+    }
+
+    fun updateKeyboardTheme(displayContext: Context) {
+        val themeUpdated = updateKeyboardThemeAndContextThemeWrapper(
+            displayContext, KeyboardTheme.getKeyboardTheme(displayContext)
+        )
+        if (themeUpdated) {
+            val settings = Settings.getInstance()
+            settings.loadSettings(
+                displayContext, settings.current.mLocale,
+                settings.current.mInputAttributes, settings.current.mCurrentKeyboardScript
+            )
+            if (mKeyboardView != null) {
+                mLatinIME?.setInputView(onCreateInputView(displayContext, mIsHardwareAcceleratedDrawingEnabled))
+            }
+        }
+    }
+
+    private fun updateKeyboardThemeAndContextThemeWrapper(
+        context: Context,
+        keyboardTheme: KeyboardTheme
+    ): Boolean {
+        val res = context.resources
+        if (mThemeNeedsReload
+            || mThemeContext == null
+            || keyboardTheme != mKeyboardTheme
+            || mCurrentDpi != res.displayMetrics.densityDpi
+            || mCurrentOrientation != res.configuration.orientation
+            || (mCurrentUiMode and Configuration.UI_MODE_NIGHT_MASK) != (res.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK)
+            || mThemeContext?.resources != res
+            || Settings.getValues().mColors.haveColorsChanged(context)
+        ) {
+            mThemeNeedsReload = false
+            mKeyboardTheme = keyboardTheme
+            mThemeContext = ContextThemeWrapper(context, keyboardTheme.mStyleId)
+            mCurrentUiMode = res.configuration.uiMode
+            mCurrentOrientation = res.configuration.orientation
+            mCurrentDpi = res.displayMetrics.densityDpi
+            KeyboardLayoutSet.onKeyboardThemeChanged()
+            return true
+        }
+        return false
+    }
+
+    fun loadKeyboard(
+        editorInfo: EditorInfo,
+        settingsValues: SettingsValues,
+        currentAutoCapsState: Int,
+        currentRecapitalizeState: RecapitalizeMode?,
+        internalAction: KeyboardLayoutSet.InternalAction?
+    ) {
+        val themeContext = mThemeContext ?: return
+        val builder = KeyboardLayoutSet.Builder(themeContext, editorInfo)
+        val keyboardWidth = ResourceUtils.getKeyboardWidth(themeContext, settingsValues)
+        val keyboardHeight = ResourceUtils.getKeyboardHeight(themeContext.resources, settingsValues)
+        val oneHandedModeEnabled = settingsValues.mOneHandedModeEnabled
+        val richImm = mRichImm ?: RichInputMethodManager.getInstance()
+        mKeyboardLayoutSet = builder.setKeyboardGeometry(keyboardWidth, keyboardHeight)
+            .setSubtype(richImm.currentSubtype)
+            .setKeyboardOptions(settingsValues)
+            .setInternalAction(internalAction)
+            .build()
+        val state = mState ?: return
+        try {
+            state.onLoadKeyboard(currentAutoCapsState, currentRecapitalizeState, oneHandedModeEnabled, settingsValues.mAbcOnReopen)
+        } catch (e: KeyboardLayoutSetException) {
+            Log.e(TAG, "loading keyboard failed: " + e.mKeyboardId, e.cause)
+            try {
+                val defaults = SubtypeUtilsAdditional.createDefaultSubtype(richImm.currentSubtypeLocale)
+                mKeyboardLayoutSet = builder.setKeyboardGeometry(keyboardWidth, keyboardHeight)
+                .setSubtype(RichInputMethodSubtype.get(defaults))
+                .setKeyboardOptions(settingsValues)
+                .build()
+                state.onLoadKeyboard(currentAutoCapsState, currentRecapitalizeState, oneHandedModeEnabled, settingsValues.mAbcOnReopen)
+                showToast("error loading the keyboard, falling back to defaults", false)
+            } catch (e2: KeyboardLayoutSetException) {
+                Log.e(TAG, "even fallback to defaults failed: " + e2.mKeyboardId, e2.cause)
+            }
+        }
+    }
+
+    fun saveKeyboardState() {
+        if (!Settings.getValues().mAbcOnReopen && (keyboard != null || isShowingEmojiPalettes || isShowingClipboardHistory)) {
+            mState?.onSaveKeyboardState()
+        }
+    }
+
+    fun onHideWindow() {
+        if (PointerTracker.isTouchpadModeActive()) {
+            PointerTracker.setTouchpadModeActive(false)
+            mKeyboardView?.alpha = 1f
+        }
+        hideLoadingAnimation()
+        mEmojiPalettesView?.stopCursorBlink()
+        mKeyboardView?.onHideWindow()
+        if (isOcrShowing) {
+            hideOcrPanels()
+        }
+        if (Settings.getValues().mAbcOnReopen) {
+            resetToMainKeyboard()
+        }
+    }
+
+    fun onConfigurationChanged(newConfig: Configuration) {
+        ScreenProfileProvider.invalidateCache()
+        setThemeNeedsReload()
+    }
+
+    private fun setKeyboard(keyboardId: Int, toggleState: KeyboardSwitchState) {
+        val keyboardView = mKeyboardView ?: return
+
+        val currentSettingsValues = Settings.getValues()
+        setMainKeyboardFrame(currentSettingsValues, toggleState)
+        val oldKeyboard = keyboardView.keyboard
+        val targetId: Int = if (KeyboardActionListenerImpl.sPersistentTextEditModeActive && (keyboardId == KeyboardId.ELEMENT_ALPHABET
+                || keyboardId == KeyboardId.ELEMENT_ALPHABET_MANUAL_SHIFTED
+                || keyboardId == KeyboardId.ELEMENT_ALPHABET_AUTOMATIC_SHIFTED
+                || keyboardId == KeyboardId.ELEMENT_ALPHABET_SHIFT_LOCKED
+                || keyboardId == KeyboardId.ELEMENT_ALPHABET_SHIFT_LOCK_SHIFTED)
+        ) {
+            KeyboardId.ELEMENT_TEXT_EDIT
+        } else {
+            keyboardId
+        }
+        val keyboardLayoutSet = mKeyboardLayoutSet ?: return
+        val newKeyboard = keyboardLayoutSet.getKeyboard(targetId)
+        keyboardView.setKeyboard(newKeyboard)
+        mCurrentInputView?.setKeyboardTopPadding(newKeyboard.mTopPadding)
+        keyboardView.setKeyPreviewPopupEnabled(currentSettingsValues.mKeyPreviewPopupOn)
+        val richImm = mRichImm ?: RichInputMethodManager.getInstance()
+        keyboardView.updateShortcutKey(richImm.isShortcutImeReady)
+        val subtypeChanged = oldKeyboard == null || newKeyboard.mId.mSubtype != oldKeyboard.mId.mSubtype
+        val languageOnSpacebarFormatType = LanguageOnSpacebarUtils.getLanguageOnSpacebarFormatType(newKeyboard.mId.mSubtype)
+        val hasMultipleEnabledIMEsOrSubtypes = richImm.hasMultipleEnabledIMEsOrSubtypes(true)
+        keyboardView.startDisplayLanguageOnSpacebar(subtypeChanged, languageOnSpacebarFormatType, hasMultipleEnabledIMEsOrSubtypes)
+        mSuggestionStripView?.updateSplitToolbarState()
+    }
+
+    val activeMainKeyboardView: MainKeyboardView?
+        get() {
+            if (isShowingEmojiPalettes) {
+                val emoji = mEmojiPalettesView
+                if (emoji?.isInSearchMode == true) {
+                    val bottomRow = emoji.findViewById<MainKeyboardView>(R.id.bottom_row_keyboard)
+                    if (bottomRow != null) return bottomRow
+                }
+            }
+            if (isShowingClipboardHistory) {
+                val clip = mClipboardHistoryView
+                if (clip?.inEditMode == true || clip?.inSearchMode == true) {
+                    val bottomRow = clip.findViewById<MainKeyboardView>(R.id.bottom_row_keyboard)
+                    if (bottomRow != null) return bottomRow
+                }
+            }
+            return mKeyboardView
+        }
+
+    val keyboard: Keyboard? get() = activeMainKeyboardView?.keyboard
+
+    fun resetKeyboardStateToAlphabet(currentAutoCapsState: Int, currentRecapitalizeState: RecapitalizeMode?) {
+        mState?.onResetKeyboardStateToAlphabet(currentAutoCapsState, currentRecapitalizeState)
+    }
+
+    fun clearTransientShiftState() {
+        mState?.clearTransientShiftState()
+    }
+
+    // A secondary view may have been shown directly, without changing the keyboard state.
+    fun returnToAlphabetKeyboard() {
+        mState?.setAlphabetKeyboard(0, null)
+    }
+
+    fun resetToMainKeyboard() {
+        KeyboardActionListenerImpl.sPersistentSelectionModeActive = false
+        KeyboardActionListenerImpl.sPersistentTextEditModeActive = false
+        PointerTracker.sPersistentTouchpadModeActive = false
+        if (PointerTracker.isTouchpadModeActive()) {
+            PointerTracker.setTouchpadModeActive(false)
+        }
+        mTouchpadView?.visibility = View.GONE
+        hideGifPicker()
+        if (isOcrShowing) {
+            hideOcrPanels()
+        }
+        if (isHandwritingShowing) {
+            mHandwritingView?.stopHandwriting()
+            mHandwritingView?.visibility = View.GONE
+        }
+        mClipboardHistoryView?.stopClipboardHistory(force = true)
+        mEmojiPalettesView?.stopEmojiPalettes()
+        mState?.resetToAlphabet()
+        setAlphabetKeyboard()
+        mSuggestionStripView?.updateSplitToolbarState()
+    }
+
+    fun onPressKey(code: Int, isSinglePointer: Boolean, currentAutoCapsState: Int, currentRecapitalizeState: RecapitalizeMode?) {
+        mState?.onPressKey(code, isSinglePointer, currentAutoCapsState, currentRecapitalizeState)
+    }
+
+    fun onReleaseKey(code: Int, withSliding: Boolean, currentAutoCapsState: Int, currentRecapitalizeState: RecapitalizeMode?) {
+        mState?.onReleaseKey(code, withSliding, currentAutoCapsState, currentRecapitalizeState)
+    }
+
+    fun onFinishSlidingInput(currentAutoCapsState: Int, currentRecapitalizeState: RecapitalizeMode?) {
+        mState?.onFinishSlidingInput(currentAutoCapsState, currentRecapitalizeState)
+    }
+
+    override fun setAlphabetKeyboard() {
+        if (DEBUG_ACTION) Log.d(TAG, "setAlphabetKeyboard")
+        setKeyboard(KeyboardId.ELEMENT_ALPHABET, KeyboardSwitchState.OTHER)
+    }
+
+    fun hideGifPicker() {
+        mGifPickerView?.let {
+            if (it.isShown || it.visibility == View.VISIBLE) {
+                it.close()
+            }
+            it.visibility = View.GONE
+        }
+        val stripVisibility = if (Settings.getValues().mToolbarMode == ToolbarMode.HIDDEN) View.GONE else View.VISIBLE
+        mStripContainer?.visibility = stripVisibility
+    }
+
+    fun setGifPickerKeyboard() {
+        val latinIme = mLatinIME ?: return
+        if (InputTypeUtils.isAnyPasswordInputType(latinIme.currentInputEditorInfo?.inputType ?: 0)) return
+        latinIme.inputLogic.commitTyped(Settings.getValues(), LastComposedWord.NOT_A_SEPARATOR)
+        setKeyboard(KeyboardId.ELEMENT_ALPHABET, KeyboardSwitchState.OTHER)
+        mStripContainer?.visibility = View.GONE
+        mGifPickerView?.let { v ->
+            v.targetProvider = { latinIme.currentInputConnection to latinIme.currentInputEditorInfo }
+            v.sessionProvider = { editorSession }
+            v.onCloseRequested = {
+                hideGifPicker()
+                setAlphabetKeyboard()
+            }
+            v.visibility = View.VISIBLE
+            v.open()
+        }
+    }
+
+    val isGifPickerShowing: Boolean
+        get() {
+            val picker = mGifPickerView ?: return false
+            return picker.isShown || picker.visibility == View.VISIBLE
+        }
+
+    val gifPickerView: helium314.keyboard.latin.gif.GifPickerView? get() = mGifPickerView
+    val clipboardHistoryView: ClipboardHistoryView? get() = mClipboardHistoryView
+
+    fun onGifSearchKey(code: Int): Boolean = isGifPickerShowing && mGifPickerView?.onHostKey(code) == true
+
+    fun onGifSearchText(text: String): Boolean = isGifPickerShowing && mGifPickerView?.onHostText(text) == true
+
+    fun onGifMoveDeletePointer(stepsX: Int, stepsY: Int): Boolean {
+        if (!isGifPickerShowing) return false
+        mGifPickerView?.onMoveDeletePointer(stepsX, stepsY)
+        return true
+    }
+
+    fun onGifMoveCursor(steps: Int): Boolean {
+        if (!isGifPickerShowing) return false
+        return mGifPickerView?.onMoveCursor(steps) == true
+    }
+
+    fun onGifUpWithDeletePointerActive(): Boolean {
+        if (!isGifPickerShowing) return false
+        mGifPickerView?.onUpWithDeletePointerActive()
+        return true
+    }
+
+    fun bumpEditorSession() {
+        editorSession++
+    }
+
+    override fun setAlphabetManualShiftedKeyboard() {
+        if (DEBUG_ACTION) Log.d(TAG, "setAlphabetManualShiftedKeyboard")
+        setKeyboard(KeyboardId.ELEMENT_ALPHABET_MANUAL_SHIFTED, KeyboardSwitchState.OTHER)
+    }
+
+    override fun setAlphabetAutomaticShiftedKeyboard() {
+        if (DEBUG_ACTION) Log.d(TAG, "setAlphabetAutomaticShiftedKeyboard")
+        setKeyboard(KeyboardId.ELEMENT_ALPHABET_AUTOMATIC_SHIFTED, KeyboardSwitchState.OTHER)
+    }
+
+    override fun setAlphabetShiftLockedKeyboard() {
+        if (DEBUG_ACTION) Log.d(TAG, "setAlphabetShiftLockedKeyboard")
+        setKeyboard(KeyboardId.ELEMENT_ALPHABET_SHIFT_LOCKED, KeyboardSwitchState.OTHER)
+    }
+
+    override fun setAlphabetShiftLockShiftedKeyboard() {
+        if (DEBUG_ACTION) Log.d(TAG, "setAlphabetShiftLockShiftedKeyboard")
+        setKeyboard(KeyboardId.ELEMENT_ALPHABET_SHIFT_LOCK_SHIFTED, KeyboardSwitchState.OTHER)
+    }
+
+    override fun setSymbolsKeyboard() {
+        if (DEBUG_ACTION) Log.d(TAG, "setSymbolsKeyboard")
+        setKeyboard(KeyboardId.ELEMENT_SYMBOLS, KeyboardSwitchState.OTHER)
+    }
+
+    override fun setSymbolsShiftedKeyboard() {
+        if (DEBUG_ACTION) Log.d(TAG, "setSymbolsShiftedKeyboard")
+        setKeyboard(KeyboardId.ELEMENT_SYMBOLS_SHIFTED, KeyboardSwitchState.SYMBOLS_SHIFTED)
+    }
+
+    override fun setCustomKeyboard(customIndex: Int) {
+        if (DEBUG_ACTION) Log.d(TAG, "setCustomKeyboard: $customIndex")
+        setKeyboard(customKeyboardElementId(customIndex), KeyboardSwitchState.OTHER)
+    }
+
+    val activeAlphabetKeyboardId: Int
+        get() = customKeyboardElementId(mState?.lastCustomIndex ?: 0)
+
+    private fun customKeyboardElementId(customIndex: Int): Int =
+        when (customIndex) {
+            1 -> KeyboardId.ELEMENT_CUSTOM1
+            2 -> KeyboardId.ELEMENT_CUSTOM2
+            3 -> KeyboardId.ELEMENT_CUSTOM3
+            4 -> KeyboardId.ELEMENT_CUSTOM4
+            5 -> KeyboardId.ELEMENT_CUSTOM5
+            else -> KeyboardId.ELEMENT_ALPHABET
+        }
+
+    fun isImeSuppressedByHardwareKeyboard(
+        settingsValues: SettingsValues,
+        toggleState: KeyboardSwitchState
+    ): Boolean {
+        if (toggleState == KeyboardSwitchState.EMOJI || toggleState == KeyboardSwitchState.CLIPBOARD) {
+            return false
+        }
+        return settingsValues.mHasHardwareKeyboard && (toggleState == KeyboardSwitchState.HIDDEN || settingsValues.mShowToolbarOnly)
+    }
+
+    private fun setMainKeyboardFrame(
+        settingsValues: SettingsValues,
+        toggleState: KeyboardSwitchState
+    ) {
+        if (isOcrShowing) {
+            mKeyboardView?.let {
+                it.visibility = View.INVISIBLE
+                it.isClickable = false
+                it.isFocusable = false
+            }
+            val ocrCamera = mOcrCameraView
+            val ocrResult = mOcrResultView
+            if (ocrCamera != null && ocrCamera.isShown) {
+                ocrCamera.bringToFront()
+            } else if (ocrResult != null && ocrResult.isShown) {
+                ocrResult.bringToFront()
+            }
+            mCurrentInputView?.let { it.post { it.requestApplyInsets() } }
+            return
+        }
+        val visibility = if (isImeSuppressedByHardwareKeyboard(settingsValues, toggleState)) View.GONE else View.VISIBLE
+        val stripVisibility = if (settingsValues.mToolbarMode == ToolbarMode.HIDDEN
+            || (PointerTracker.sPersistentTouchpadModeActive && settingsValues.mTouchpadFullscreen)
+            || isGifPickerShowing) View.GONE else View.VISIBLE
+        mStripContainer?.visibility = stripVisibility
+        val wasSecondaryShowing = (mEmojiPalettesView?.visibility == View.VISIBLE)
+            || (mClipboardHistoryView?.visibility == View.VISIBLE)
+            || (mTouchpadView?.visibility == View.VISIBLE)
+        PointerTracker.switchTo(mKeyboardView)
+        if (PointerTracker.sPersistentTouchpadModeActive) {
+            mKeyboardView?.visibility = if (visibility == View.VISIBLE) View.INVISIBLE else View.GONE
+        } else {
+            mKeyboardView?.visibility = visibility
+            if (visibility == View.VISIBLE) {
+                if (PointerTracker.isTouchpadModeActive()) {
+                    mKeyboardView?.animate()?.cancel()
+                    mKeyboardView?.alpha = 0.5f
+                } else {
+                    val duration = Settings.getAnimationDuration(60)
+                    if (duration > 0L && wasSecondaryShowing) {
+                        mKeyboardView?.alpha = 0.5f
+                        mKeyboardView?.animate()?.cancel()
+                        mKeyboardView?.animate()?.alpha(1f)?.setDuration(duration)?.setInterpolator(VIEW_SWITCH_ENTER_INTERPOLATOR)?.start()
+                    } else {
+                        mKeyboardView?.alpha = 1f
+                    }
+                }
+            }
+        }
+        mMainKeyboardFrame?.visibility = if (stripVisibility == View.VISIBLE || visibility == View.VISIBLE) View.VISIBLE else View.GONE
+        mKeyboardViewWrapper?.visibility = visibility
+        (mCurrentInputView as? InputView)?.updateBottomPadding()
+        mEmojiPalettesView?.let {
+            it.animate()?.cancel()
+            it.alpha = 1f
+            it.translationY = 0f
+            it.visibility = View.GONE
+            it.stopEmojiPalettes()
+        }
+        (mEmojiTabStripScrollView ?: mEmojiTabStripView)?.visibility = View.GONE
+        mClipboardStripScrollView?.visibility = View.GONE
+        mClipboardEditStripView?.visibility = View.GONE
+        mOcrStripScrollView?.visibility = View.GONE
+        mStylePreviewStripView?.visibility = View.GONE
+        val isCjkComposing = mLatinIME?.let { CjkInputManager.getInstance(it).isComposing } == true
+        if (isCjkComposing) {
+            mSuggestionStripView?.visibility = View.GONE
+            mCjkCandidateStripView?.visibility = View.VISIBLE
+        } else {
+            mCjkCandidateStripView?.visibility = View.GONE
+            mSuggestionStripView?.visibility = stripVisibility
+        }
+        mClipboardHistoryView?.let {
+            if (it.inEditMode) return@let
+            it.animate()?.cancel()
+            it.alpha = 1f
+            it.translationY = 0f
+            it.visibility = View.GONE
+            it.stopClipboardHistory(force = true)
+        }
+        mHandwritingView?.let {
+            if (it.isShown) it.stopHandwriting()
+            it.visibility = View.GONE
+        }
+        mOcrCameraView?.let {
+            it.stopCamera()
+            it.visibility = View.GONE
+        }
+        mOcrResultView?.visibility = View.GONE
+
+        if (PointerTracker.sPersistentTouchpadModeActive) {
+            mTouchpadView?.let { touchpad ->
+                val kbView = mKeyboardView
+                touchpad.visibility = visibility
+                touchpad.applyColors(Settings.getValues().mColors)
+                if (kbView != null) {
+                    touchpad.setPadding(
+                        kbView.paddingLeft,
+                        kbView.paddingTop,
+                        kbView.paddingRight,
+                        kbView.paddingBottom
+                    )
+                }
+            }
+        } else {
+            mTouchpadView?.visibility = View.GONE
+        }
+        // Any return to the main keyboard ends the touchpad, so bring back the one-handed controls it hid
+        mKeyboardViewWrapper?.oneHandedControlsHidden = PointerTracker.sPersistentTouchpadModeActive && visibility == View.VISIBLE
+    }
+
+    override fun setEmojiKeyboard() {
+        if (DEBUG_ACTION) Log.d(TAG, "setEmojiKeyboard")
+        hideGifPicker()
+        mLatinIME?.let { ime ->
+            ime.inputLogic.commitTyped(Settings.getValues(), LastComposedWord.NOT_A_SEPARATOR)
+        }
+        PointerTracker.sPersistentTouchpadModeActive = false
+        mTouchpadView?.visibility = View.GONE
+        KeyboardActionListenerImpl.sPersistentTextEditModeActive = false
+        mMainKeyboardFrame?.visibility = View.VISIBLE
+        mKeyboardViewWrapper?.visibility = View.VISIBLE
+        (mCurrentInputView as? InputView)?.updateBottomPadding()
+        mKeyboardView?.animate()?.cancel()
+        mKeyboardView?.visibility = View.GONE
+        val splitToolbar = Settings.getValues().mSplitToolbar
+        mSuggestionStripView?.visibility = if (splitToolbar) View.VISIBLE else View.GONE
+        mStripContainer?.visibility = getSecondaryStripVisibility()
+        mClipboardStripScrollView?.visibility = View.GONE
+        mClipboardEditStripView?.visibility = View.GONE
+        mCjkCandidateStripView?.visibility = View.GONE
+        mStylePreviewStripView?.visibility = View.GONE
+        (mEmojiTabStripScrollView ?: mEmojiTabStripView)?.visibility = View.VISIBLE
+        mClipboardHistoryView?.let {
+            it.animate()?.cancel()
+            it.alpha = 1f
+            it.translationY = 0f
+            it.visibility = View.GONE
+        }
+        mEmojiPalettesView?.let {
+            it.startEmojiPalettes(mKeyboardView?.keyVisualAttribute, mLatinIME?.currentInputEditorInfo, mLatinIME?.mKeyboardActionListener)
+            it.visibility = View.VISIBLE
+            val duration = Settings.getAnimationDuration(60)
+            if (duration > 0L) {
+                it.alpha = 0.5f
+                it.translationY = 0f
+                it.animate()?.cancel()
+                it.animate()
+                    ?.alpha(1f)
+                    ?.translationY(0f)
+                    ?.setDuration(duration)
+                    ?.setInterpolator(VIEW_SWITCH_ENTER_INTERPOLATOR)
+                    ?.start()
+            } else {
+                it.animate()?.cancel()
+                it.alpha = 1f
+                it.translationY = 0f
+            }
+        }
+        if (splitToolbar) {
+            mSuggestionStripView?.updateSplitToolbarState()
+        }
+    }
+
+    override fun setClipboardKeyboard() {
+        if (DEBUG_ACTION) Log.d(TAG, "setClipboardKeyboard")
+        val ime = mLatinIME ?: return
+        if (isDeviceLocked(ime)) return
+        hideGifPicker()
+        mLatinIME?.let { ime ->
+            ime.inputLogic.commitTyped(Settings.getValues(), LastComposedWord.NOT_A_SEPARATOR)
+        }
+        PointerTracker.sPersistentTouchpadModeActive = false
+        mTouchpadView?.visibility = View.GONE
+        KeyboardActionListenerImpl.sPersistentTextEditModeActive = false
+        mMainKeyboardFrame?.visibility = View.VISIBLE
+        mKeyboardViewWrapper?.visibility = View.VISIBLE
+        (mCurrentInputView as? InputView)?.updateBottomPadding()
+        mKeyboardView?.animate()?.cancel()
+        mKeyboardView?.visibility = View.GONE
+        (mEmojiTabStripScrollView ?: mEmojiTabStripView)?.visibility = View.GONE
+        mCjkCandidateStripView?.visibility = View.GONE
+        mSuggestionStripView?.visibility = View.GONE
+        mStylePreviewStripView?.visibility = View.GONE
+        mStripContainer?.visibility = getSecondaryStripVisibility()
+        mClipboardStripScrollView?.let { scrollView ->
+            scrollView.post { scrollView.scrollTo(0, 0) }
+            Settings.getValues().mColors.setBackground(scrollView, ColorType.STRIP_BACKGROUND)
+            scrollView.visibility = View.VISIBLE
+        }
+        mEmojiPalettesView?.let {
+            it.animate()?.cancel()
+            it.alpha = 1f
+            it.translationY = 0f
+            it.visibility = View.GONE
+        }
+        mClipboardHistoryView?.let {
+            val latinIme = mLatinIME ?: return@let
+            val editorInfo = latinIme.currentInputEditorInfo ?: return@let
+            it.startClipboardHistory(
+                latinIme.clipboardHistoryManager,
+                mKeyboardView?.keyVisualAttribute,
+                editorInfo,
+                latinIme.mKeyboardActionListener
+            )
+            it.visibility = View.VISIBLE
+            val duration = Settings.getAnimationDuration(60)
+            if (duration > 0L) {
+                it.alpha = 0.5f
+                it.translationY = 0f
+                it.animate()?.cancel()
+                it.animate()
+                    ?.alpha(1f)
+                    ?.translationY(0f)
+                    ?.setDuration(duration)
+                    ?.setInterpolator(VIEW_SWITCH_ENTER_INTERPOLATOR)
+                    ?.start()
+            } else {
+                it.animate()?.cancel()
+                it.alpha = 1f
+                it.translationY = 0f
+            }
+        }
+    }
+
+    fun setHandwritingKeyboard() {
+        if (DEBUG_ACTION) Log.d(TAG, "setHandwritingKeyboard")
+        hideGifPicker()
+        mLatinIME?.let { ime ->
+            ime.inputLogic.commitTyped(Settings.getValues(), LastComposedWord.NOT_A_SEPARATOR)
+        }
+        PointerTracker.sPersistentTouchpadModeActive = false
+        mTouchpadView?.visibility = View.GONE
+        KeyboardActionListenerImpl.sPersistentTextEditModeActive = false
+        mMainKeyboardFrame?.visibility = View.VISIBLE
+        mKeyboardViewWrapper?.visibility = View.VISIBLE
+        (mCurrentInputView as? InputView)?.updateBottomPadding()
+        mKeyboardView?.visibility = View.GONE
+        (mEmojiTabStripScrollView ?: mEmojiTabStripView)?.visibility = View.GONE
+        mCjkCandidateStripView?.visibility = View.GONE
+        mSuggestionStripView?.visibility = View.VISIBLE
+        mStripContainer?.visibility = View.VISIBLE
+        mClipboardStripScrollView?.visibility = View.GONE
+        mClipboardEditStripView?.visibility = View.GONE
+        mEmojiPalettesView?.visibility = View.GONE
+        mClipboardHistoryView?.visibility = View.GONE
+
+        mHandwritingView?.let { handwritingView ->
+            val latinIme = mLatinIME ?: return@let
+            val editorInfo = latinIme.currentInputEditorInfo ?: return@let
+            val richImm = mRichImm ?: RichInputMethodManager.getInstance()
+            val subtype = richImm.currentSubtype
+            val subtypeLanguage = subtype.locale.toLanguageTag()
+            val effectiveLanguage = HandwritingLoader.getEffectiveLanguage(latinIme, subtypeLanguage)
+            handwritingView.startHandwriting(
+                editorInfo,
+                latinIme.mKeyboardActionListener,
+                effectiveLanguage
+            )
+            handwritingView.visibility = View.VISIBLE
+        }
+    }
+
+    val isHandwritingShowing: Boolean get() = mHandwritingView?.isShown == true
+
+    fun clearHandwritingCanvas() {
+        mHandwritingView?.clearCanvasAndComposition()
+    }
+
+    fun showOcrCamera() {
+        if (DEBUG_ACTION) Log.d(TAG, "showOcrCamera")
+        hideGifPicker()
+        PointerTracker.sPersistentTouchpadModeActive = false
+        mTouchpadView?.visibility = View.GONE
+        KeyboardActionListenerImpl.sPersistentTextEditModeActive = false
+        mMainKeyboardFrame?.visibility = View.VISIBLE
+        mKeyboardView?.let {
+            it.visibility = View.INVISIBLE
+            it.isClickable = false
+            it.isFocusable = false
+        }
+        (mEmojiTabStripScrollView ?: mEmojiTabStripView)?.visibility = View.GONE
+        mSuggestionStripView?.visibility = View.GONE
+        mStripContainer?.visibility = View.GONE
+        mClipboardStripScrollView?.visibility = View.GONE
+        mClipboardEditStripView?.visibility = View.GONE
+        mStylePreviewStripView?.visibility = View.GONE
+        mEmojiPalettesView?.visibility = View.GONE
+        mClipboardHistoryView?.visibility = View.GONE
+        mHandwritingView?.let {
+            if (it.isShown) it.stopHandwriting()
+            it.visibility = View.GONE
+        }
+        mOcrResultView?.visibility = View.GONE
+        mOcrCameraView?.let { cameraView ->
+            val resources = mThemeContext?.resources ?: return@let
+            val ocrCameraHeight = ResourceUtils.getOcrCameraHeight(resources, Settings.getValues())
+            val lp = cameraView.layoutParams
+            if (lp != null) {
+                lp.height = ocrCameraHeight
+                cameraView.layoutParams = lp
+            }
+            cameraView.visibility = View.VISIBLE
+            cameraView.bringToFront()
+            cameraView.startCamera()
+        }
+        requestInputViewLayoutAndInsets()
+    }
+
+    fun showOcrResult(lines: List<String>) {
+        if (DEBUG_ACTION) Log.d(TAG, "showOcrResult")
+        PointerTracker.sPersistentTouchpadModeActive = false
+        mTouchpadView?.visibility = View.GONE
+        KeyboardActionListenerImpl.sPersistentTextEditModeActive = false
+        mMainKeyboardFrame?.visibility = View.VISIBLE
+        mKeyboardView?.let {
+            it.visibility = View.INVISIBLE
+            it.isClickable = false
+            it.isFocusable = false
+        }
+        (mEmojiTabStripScrollView ?: mEmojiTabStripView)?.visibility = View.GONE
+        mSuggestionStripView?.visibility = View.GONE
+        mClipboardStripScrollView?.visibility = View.GONE
+        mClipboardEditStripView?.visibility = View.GONE
+        mStylePreviewStripView?.visibility = View.GONE
+        mEmojiPalettesView?.visibility = View.GONE
+        mClipboardHistoryView?.visibility = View.GONE
+        mHandwritingView?.let {
+            if (it.isShown) it.stopHandwriting()
+            it.visibility = View.GONE
+        }
+        mOcrStripScrollView?.let {
+            Settings.getValues().mColors.setBackground(it, ColorType.STRIP_BACKGROUND)
+            it.visibility = View.VISIBLE
+        }
+        mStripContainer?.visibility = View.VISIBLE
+        mOcrCameraView?.let {
+            it.stopCamera()
+            it.visibility = View.GONE
+            val lp = it.layoutParams
+            if (lp != null) {
+                lp.height = ViewGroup.LayoutParams.WRAP_CONTENT
+                it.layoutParams = lp
+            }
+        }
+        mOcrResultView?.let { resultView ->
+            val resources = mThemeContext?.resources ?: return@let
+            val keyboardHeight = ResourceUtils.getKeyboardHeight(resources, Settings.getValues())
+            val lp = resultView.layoutParams
+            if (lp != null) {
+                lp.height = keyboardHeight
+                resultView.layoutParams = lp
+            }
+            resultView.setResultText(lines)
+            resultView.applyColors(Settings.getValues().mColors)
+            resultView.visibility = View.VISIBLE
+            resultView.bringToFront()
+        }
+        requestInputViewLayoutAndInsets()
+    }
+
+    fun hideOcrPanels() {
+        mOcrStripScrollView?.visibility = View.GONE
+        mCjkCandidateStripView?.visibility = View.GONE
+        mStylePreviewStripView?.visibility = View.GONE
+        mSuggestionStripView?.visibility = View.VISIBLE
+        mStripContainer?.visibility = View.VISIBLE
+        mOcrCameraView?.let {
+            it.stopCamera()
+            it.visibility = View.GONE
+            val lp = it.layoutParams
+            if (lp != null) {
+                lp.height = ViewGroup.LayoutParams.WRAP_CONTENT
+                it.layoutParams = lp
+            }
+        }
+        mOcrResultView?.let {
+            it.visibility = View.GONE
+            val lp = it.layoutParams
+            if (lp != null) {
+                lp.height = ViewGroup.LayoutParams.WRAP_CONTENT
+                it.layoutParams = lp
+            }
+        }
+        mKeyboardView?.let {
+            it.visibility = View.VISIBLE
+            it.isClickable = true
+            it.isFocusable = true
+        }
+        requestInputViewLayoutAndInsets()
+        setAlphabetKeyboard()
+    }
+
+    private fun requestInputViewLayoutAndInsets() {
+        mCurrentInputView?.let { view ->
+            if (view.isInLayout) {
+                view.post { view.requestLayout() }
+            } else {
+                view.requestLayout()
+            }
+            view.post { view.requestApplyInsets() }
+        }
+    }
+
+    val isOcrCameraShowing: Boolean
+        get() {
+            val camera = mOcrCameraView ?: return false
+            return camera.isShown || camera.visibility == View.VISIBLE
+        }
+
+    val isOcrShowing: Boolean
+        get() {
+            if (isOcrCameraShowing) return true
+            val result = mOcrResultView ?: return false
+            return result.isShown || result.visibility == View.VISIBLE
+        }
+
+    fun showStyleStrip(targetText: String, onApply: (String) -> Unit) {
+        val strip = mStylePreviewStripView ?: return
+        mSuggestionStripView?.visibility = View.GONE
+        mCjkCandidateStripView?.visibility = View.GONE
+        mClipboardStripScrollView?.visibility = View.GONE
+        mClipboardEditStripView?.visibility = View.GONE
+        mOcrStripScrollView?.visibility = View.GONE
+        strip.applyTheme()
+        strip.setTargetText(
+            targetText = targetText,
+            onApply = onApply,
+            onDismiss = { hideStyleStrip() }
+        )
+        strip.visibility = View.VISIBLE
+        mStripContainer?.visibility = View.VISIBLE
+    }
+
+    fun hideStyleStrip() {
+        mStylePreviewStripView?.visibility = View.GONE
+        val isCjkComposing = mLatinIME?.let { CjkInputManager.getInstance(it).isComposing } == true
+        if (isCjkComposing) {
+            mSuggestionStripView?.visibility = View.GONE
+            mCjkCandidateStripView?.visibility = View.VISIBLE
+        } else {
+            mCjkCandidateStripView?.visibility = View.GONE
+            val stripVisibility = if (Settings.getValues().mToolbarMode == ToolbarMode.HIDDEN) View.GONE else View.VISIBLE
+            mSuggestionStripView?.visibility = stripVisibility
+            mSuggestionStripView?.updateToolbarButtonsActivatedState()
+        }
+    }
+
+    fun setUnicodeSymbolsKeyboard() {
+        setEmojiKeyboard()
+        mEmojiPalettesView?.switchToCategory(EmojiCategory.ID_UNICODE_SYMBOLS)
+    }
+
+    override fun setNumpadKeyboard() {
+        if (DEBUG_ACTION) Log.d(TAG, "setNumpadKeyboard")
+        setKeyboard(KeyboardId.ELEMENT_NUMPAD, KeyboardSwitchState.OTHER)
+    }
+
+    override fun toggleNumpad(
+        withSliding: Boolean,
+        autoCapsFlags: Int,
+        recapitalizeMode: RecapitalizeMode?,
+        forceReturnToAlpha: Boolean
+    ) {
+        if (DEBUG_ACTION) Log.d(TAG, "toggleNumpad")
+        mState?.toggleNumpad(withSliding, autoCapsFlags, recapitalizeMode, forceReturnToAlpha, true)
+    }
+
+    enum class KeyboardSwitchState(val mKeyboardId: Int) {
+        HIDDEN(-1),
+        SYMBOLS_SHIFTED(KeyboardId.ELEMENT_SYMBOLS_SHIFTED),
+        EMOJI(KeyboardId.ELEMENT_EMOJI_RECENTS),
+        CLIPBOARD(KeyboardId.ELEMENT_CLIPBOARD),
+        OTHER(-1)
+    }
+
+    val keyboardSwitchState: KeyboardSwitchState
+        get() {
+            val hidden = !isShowingEmojiPalettes && !isShowingClipboardHistory
+                    && (mKeyboardLayoutSet == null || mKeyboardView?.isShown != true)
+            return when {
+                hidden -> KeyboardSwitchState.HIDDEN
+                isShowingEmojiPalettes -> KeyboardSwitchState.EMOJI
+                isShowingClipboardHistory -> KeyboardSwitchState.CLIPBOARD
+                isShowingKeyboardId(KeyboardId.ELEMENT_SYMBOLS_SHIFTED) -> KeyboardSwitchState.SYMBOLS_SHIFTED
+                else -> KeyboardSwitchState.OTHER
+            }
+        }
+
+    fun onToggleKeyboard(toggleState: KeyboardSwitchState) {
+        val currentState = keyboardSwitchState
+        Log.w(TAG, "onToggleKeyboard() : Current = $currentState : Toggle = $toggleState")
+        if (currentState == toggleState) {
+            val settings = Settings.getValues()
+            if (settings.mHasHardwareKeyboard && (settings.mShowToolbarOnly || settings.mToolbarMode != ToolbarMode.HIDDEN)) {
+                setAlphabetKeyboard()
+            } else {
+                mLatinIME?.stopShowingInputView()
+                mLatinIME?.hideWindow()
+                setAlphabetKeyboard()
+            }
+        } else {
+            mLatinIME?.startShowingInputView(true)
+            when (toggleState) {
+                KeyboardSwitchState.EMOJI -> setEmojiKeyboard()
+                KeyboardSwitchState.CLIPBOARD -> setClipboardKeyboard()
+                else -> {
+                    mEmojiPalettesView?.let {
+                        it.stopEmojiPalettes()
+                        it.visibility = View.GONE
+                    }
+                    mClipboardHistoryView?.let {
+                        it.visibility = View.GONE
+                        it.stopClipboardHistory(force = true)
+                    }
+                    mMainKeyboardFrame?.visibility = View.VISIBLE
+                    mKeyboardView?.visibility = View.VISIBLE
+                    setKeyboard(toggleState.mKeyboardId, toggleState)
+                }
+            }
+        }
+    }
+
+    /** Enables or disables caps lock, see [KeyboardState.setCapsLock]. */
+    fun setCapsLock(enabled: Boolean) {
+        mState?.setCapsLock(enabled)
+    }
+
+    val isShiftChording: Boolean
+        get() = mState?.isShiftChording == true
+
+    val isAlphabetShiftLocked: Boolean
+        get() = mState?.isAlphabetShiftLocked == true
+
+    val isAlphabetShifted: Boolean
+        get() = mState?.isAlphabetShifted == true
+
+    override val isDisplayedAlphabetShifted: Boolean
+        get() = keyboard?.mId?.isAlphabetShifted == true
+
+    override fun requestUpdatingShiftState(autoCapsFlags: Int, recapitalizeMode: RecapitalizeMode?) {
+        if (DEBUG_ACTION) {
+            Log.d(TAG, "requestUpdatingShiftState: autoCapsFlags=" + CapsModeUtils.flagsToString(autoCapsFlags) + " recapitalizeMode=" + recapitalizeMode)
+        }
+        // A shift change reloads the alphabet keyboard, which hides the handwriting panel (e.g. auto-caps
+        // turning off after the first handwritten word). The state is re-synced when handwriting is left.
+        if (isHandwritingShowing) return
+        mState?.onUpdateShiftState(autoCapsFlags, recapitalizeMode)
+    }
+
+    override fun startDoubleTapShiftKeyTimer() {
+        if (DEBUG_TIMER_ACTION) Log.d(TAG, "startDoubleTapShiftKeyTimer")
+        mKeyboardView?.startDoubleTapShiftKeyTimer()
+    }
+
+    override fun cancelDoubleTapShiftKeyTimer() {
+        if (DEBUG_TIMER_ACTION) Log.d(TAG, "setAlphabetKeyboard")
+        mKeyboardView?.cancelDoubleTapShiftKeyTimer()
+    }
+
+    override fun setOneHandedModeEnabled(enabled: Boolean) {
+        setOneHandedModeEnabled(enabled, false)
+    }
+
+    fun setOneHandedModeEnabled(enabled: Boolean, force: Boolean) {
+        val wrapper = mKeyboardViewWrapper ?: return
+        val settings = Settings.getInstance()
+        if (!force && wrapper.oneHandedModeEnabled == enabled) {
+            // The side is stored per orientation and split state, so keep it in sync on every keyboard load,
+            // otherwise the wrapper keeps a stale side and the switch button flips from the wrong one.
+            val gravity = settings.current.mOneHandedModeGravity
+            if (enabled && wrapper.oneHandedGravity != gravity) wrapper.oneHandedGravity = gravity
+            return
+        }
+        wrapper.oneHandedModeEnabled = enabled
+        wrapper.oneHandedGravity = settings.current.mOneHandedModeGravity
+        settings.writeOneHandedModeEnabled(enabled)
+        reloadKeyboard()
+    }
+
+    override fun switchOneHandedMode() {
+        val wrapper = mKeyboardViewWrapper ?: return
+        wrapper.switchOneHandedModeSide()
+        Settings.getInstance().writeOneHandedModeGravity(wrapper.oneHandedGravity)
+    }
+
+    override fun toggleFloatingKeyboard() {
+        mLatinIME?.floatingKeyboardManager?.toggle()
+    }
+
+    private var mWasToolbarVisibleBeforeTouchpad = false
+
+    fun showTouchpadView() {
+        val touchpad = mTouchpadView ?: return
+        val kbView = mKeyboardView ?: return
+        mWasToolbarVisibleBeforeTouchpad = mSuggestionStripView?.isToolbarShowing == true ||
+            mSuggestionStripView?.isToolbarManuallyOpen == true ||
+            Settings.getValues().mAutoShowToolbar ||
+            Settings.getValues().mToolbarMode == ToolbarMode.TOOLBAR_KEYS
+        kbView.visibility = View.INVISIBLE
+        mEmojiPalettesView?.visibility = View.GONE
+        mClipboardHistoryView?.visibility = View.GONE
+        mKeyboardViewWrapper?.oneHandedControlsHidden = true
+        if (Settings.getValues().mTouchpadFullscreen) {
+            mStripContainer?.visibility = View.GONE
+            requestInputViewLayoutAndInsets()
+        }
+        touchpad.setPadding(
+            kbView.paddingLeft,
+            kbView.paddingTop,
+            kbView.paddingRight,
+            kbView.paddingBottom
+        )
+        touchpad.applyColors(Settings.getValues().mColors)
+        touchpad.visibility = View.VISIBLE
+        val duration = Settings.getAnimationDuration(50)
+        if (duration > 0L) {
+            touchpad.alpha = 0.5f
+            touchpad.animate()?.cancel()
+            touchpad.animate()
+                ?.alpha(1f)
+                ?.setDuration(duration)
+                ?.setInterpolator(VIEW_SWITCH_ENTER_INTERPOLATOR)
+                ?.start()
+        } else {
+            touchpad.animate()?.cancel()
+            touchpad.alpha = 1f
+        }
+        mMainKeyboardFrame?.visibility = View.VISIBLE
+        mKeyboardViewWrapper?.requestLayout()
+    }
+
+    fun hideTouchpadView() {
+        PointerTracker.sPersistentTouchpadModeActive = false
+        val touchpad = mTouchpadView ?: return
+        touchpad.animate()?.cancel()
+        val shouldRestoreToolbar = (mWasToolbarVisibleBeforeTouchpad ||
+            mSuggestionStripView?.isToolbarManuallyOpen == true ||
+            Settings.getValues().mAutoShowToolbar ||
+            Settings.getValues().mToolbarMode == ToolbarMode.TOOLBAR_KEYS) &&
+            Settings.getValues().mToolbarMode != ToolbarMode.SUGGESTION_STRIP
+
+        mLatinIME?.isCursorGestureActive = false
+        setMainKeyboardFrame(Settings.getValues(), KeyboardSwitchState.OTHER)
+        touchpad.visibility = View.GONE
+        touchpad.alpha = 1f
+
+        if (shouldRestoreToolbar) {
+            mSuggestionStripView?.isToolbarManuallyOpen = true
+            mSuggestionStripView?.setToolbarVisibility(true, saveState = false)
+            mLatinIME?.mHandler?.cancelResumeSuggestions()
+        } else {
+            mSuggestionStripView?.isToolbarManuallyOpen = false
+            mSuggestionStripView?.setToolbarVisibility(false, saveState = false)
+            mLatinIME?.let { ime ->
+                ime.setNeutralSuggestionStrip()
+                ime.mHandler.postResumeSuggestions(false)
+            }
+        }
+        mSuggestionStripView?.updateSplitToolbarState()
+        requestInputViewLayoutAndInsets()
+        mKeyboardViewWrapper?.let { wrapper ->
+            wrapper.oneHandedControlsHidden = false
+            wrapper.requestLayout()
+        }
+    }
+
+    val touchpadView: TouchpadView? get() = mTouchpadView
+
+    fun showTextEditView() {
+        setKeyboard(KeyboardId.ELEMENT_TEXT_EDIT, KeyboardSwitchState.OTHER)
+        mSuggestionStripView?.updateSplitToolbarState()
+    }
+
+    fun hideTextEditView() {
+        KeyboardActionListenerImpl.sPersistentSelectionModeActive = false
+        KeyboardActionListenerImpl.sPersistentTextEditModeActive = false
+        setAlphabetKeyboard()
+        mSuggestionStripView?.updateSplitToolbarState()
+    }
+
+    fun toggleSplitKeyboardMode() {
+        val settings = Settings.getInstance()
+        settings.writeSplitKeyboardEnabled(
+            !settings.current.mIsSplitKeyboardEnabled,
+            mCurrentOrientation == Configuration.ORIENTATION_LANDSCAPE
+        )
+        setOneHandedModeEnabled(settings.current.mOneHandedModeEnabled, true)
+        reloadKeyboard()
+    }
+
+    fun reloadKeyboard() {
+        if (mCurrentInputView == null) return
+        KeyboardLayoutSet.clearKeyboardCache()
+        mEmojiPalettesView?.clearKeyboardCache()
+        mSuggestionStripView?.onFloatingKeyboardScaleChanged()
+        reloadMainKeyboard()
+    }
+
+    fun reloadMainKeyboard() {
+        val abcOnReopen = Settings.getValues().mAbcOnReopen
+        val isSearchingEmoji = isShowingEmojiPalettes && mEmojiPalettesView?.isInSearchMode == true
+        val wasEmoji = (!abcOnReopen || isSearchingEmoji) && isShowingEmojiPalettes
+        val wasClipboard = !abcOnReopen && isShowingClipboardHistory
+        val wasTextEdit = !abcOnReopen && (keyboard?.mId?.mElementId == KeyboardId.ELEMENT_TEXT_EDIT || KeyboardActionListenerImpl.sPersistentTextEditModeActive)
+        if (abcOnReopen && !isSearchingEmoji) {
+            KeyboardActionListenerImpl.sPersistentSelectionModeActive = false
+            KeyboardActionListenerImpl.sPersistentTextEditModeActive = false
+            PointerTracker.sPersistentTouchpadModeActive = false
+        }
+        val latinIme = mLatinIME
+        if (latinIme != null) {
+            loadKeyboard(
+                latinIme.currentInputEditorInfo, Settings.getValues(),
+                latinIme.currentAutoCapsState, latinIme.currentRecapitalizeState, null
+            )
+        }
+        if (wasEmoji) {
+            setEmojiKeyboard()
+        } else if (wasClipboard) {
+            setClipboardKeyboard()
+        } else if (wasTextEdit) {
+            showTextEditView()
+        }
+    }
+
+    fun showToast(text: String, briefToast: Boolean) {
+        val latinIme = mLatinIME ?: return
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.S_V2) {
+            val toastLength = if (briefToast) Toast.LENGTH_SHORT else Toast.LENGTH_LONG
+            val toast = Toast.makeText(latinIme, text, toastLength)
+            toast.setGravity(Gravity.CENTER, 0, 0)
+            toast.show()
+        } else {
+            val toastLength = if (briefToast) 2000 else 3500
+            showFakeToast(text, toastLength)
+        }
+    }
+
+    fun showLoadingAnimation() {
+        mSuggestionStripView?.showLoadingAnimation()
+    }
+
+    fun hideLoadingAnimation() {
+        mSuggestionStripView?.hideLoadingAnimation()
+    }
+
+    private fun showFakeToast(text: String, timeMillis: Int) {
+        val fakeToastView = mFakeToastView ?: return
+        val latinIme = mLatinIME ?: return
+        if (fakeToastView.visibility == View.VISIBLE) return
+
+        val appIcon = fakeToastView.compoundDrawables[0]
+        if (appIcon != null) {
+            val bound = fakeToastView.lineHeight
+            appIcon.setBounds(0, 0, bound, bound)
+            fakeToastView.setCompoundDrawables(appIcon, null, null, null)
+        }
+        fakeToastView.text = text
+        fakeToastView.visibility = View.VISIBLE
+        fakeToastView.bringToFront()
+        fakeToastView.startAnimation(AnimationUtils.loadAnimation(latinIme, R.anim.fade_in))
+
+        fakeToastView.postDelayed({
+            fakeToastView.startAnimation(AnimationUtils.loadAnimation(latinIme, R.anim.fade_out))
+            fakeToastView.visibility = View.GONE
+        }, timeMillis.toLong())
+    }
+
+    override val isInDoubleTapShiftKeyTimeout: Boolean
+        get() {
+            if (DEBUG_TIMER_ACTION) Log.d(TAG, "isInDoubleTapShiftKeyTimeout")
+            val keyboardView = mKeyboardView ?: return false
+            return keyboardView.isInDoubleTapShiftKeyTimeout()
+        }
+
+    fun onEvent(event: Event, currentAutoCapsState: Int, currentRecapitalizeState: RecapitalizeMode?) {
+        mState?.onEvent(event, currentAutoCapsState, currentRecapitalizeState)
+    }
+
+    fun isShowingKeyboardId(vararg keyboardIds: Int): Boolean {
+        val keyboardView = mKeyboardView ?: return false
+        if (!keyboardView.isShown) return false
+        val kb = keyboardView.keyboard ?: return false
+        val activeKeyboardId = kb.mId.mElementId
+        for (id in keyboardIds) {
+            if (activeKeyboardId == id) return true
+        }
+        return false
+    }
+
+    val isShowingEmojiPalettes: Boolean
+        get() {
+            val emojiView = mEmojiPalettesView ?: return false
+            return emojiView.isShown || emojiView.visibility == View.VISIBLE
+        }
+
+    val isShowingClipboardHistory: Boolean
+        get() {
+            val clipView = mClipboardHistoryView ?: return false
+            return clipView.isShown || clipView.visibility == View.VISIBLE
+        }
+
+    val isTouchpadShowing: Boolean
+        get() = mTouchpadView?.let { it.isShown || it.visibility == View.VISIBLE } == true
+
+    val isSecondaryViewShowing: Boolean
+        get() = isGifPickerShowing || isShowingEmojiPalettes || isShowingClipboardHistory || isOcrShowing || isHandwritingShowing || isTouchpadShowing
+
+    val isShowingPopupKeysPanel: Boolean
+        get() {
+            if (activeMainKeyboardView?.isShowingPopupKeysPanel() == true) {
+                return true
+            }
+            if (isShowingEmojiPalettes) {
+                return mEmojiPalettesView?.isShowingPopupKeysPanel() == true
+            }
+            return false
+        }
+
+    val isShowingStripContainer: Boolean
+        get() = mStripContainer?.isShown == true
+
+    val emojiPalettesView: EmojiPalettesView? get() = mEmojiPalettesView
+
+    val visibleKeyboardView: View?
+        get() {
+            val ocrResult = mOcrResultView
+            val touchpad = mTouchpadView
+            return when {
+                isOcrCameraShowing -> mOcrCameraView
+                ocrResult != null && (ocrResult.isShown || ocrResult.visibility == View.VISIBLE) -> ocrResult
+                isShowingEmojiPalettes -> mEmojiPalettesView
+                isShowingClipboardHistory -> mClipboardHistoryView
+                isHandwritingShowing -> mHandwritingView
+                touchpad != null && (touchpad.isShown || touchpad.visibility == View.VISIBLE) -> touchpad
+                else -> mKeyboardView
+            }
+        }
+
+    val wrapperView: View? get() = mKeyboardViewWrapper
+
+    val emojiTabStrip: LinearLayout? get() = mEmojiTabStripView
+
+    val emojiTabStripScrollView: HorizontalScrollView? get() = mEmojiTabStripScrollView
+
+    val clipboardStrip: LinearLayout? get() = mClipboardStripView
+
+    val clipboardStripScrollView: HorizontalScrollView? get() = mClipboardStripScrollView
+
+    val clipboardEditStrip: LinearLayout? get() = mClipboardEditStripView
+
+    val ocrStrip: LinearLayout? get() = mOcrStripView
+
+    val ocrStripScrollView: HorizontalScrollView? get() = mOcrStripScrollView
+
+    val mainKeyboardView: MainKeyboardView? get() = mKeyboardView
+
+    val suggestionStripView: SuggestionStripView? get() = mSuggestionStripView
+
+    val stripContainer: LinearLayout? get() = mStripContainer
+
+    val stylePreviewStripView: StylePreviewStripView? get() = mStylePreviewStripView
+
+    val isShowingStyleStrip: Boolean
+        get() = mStylePreviewStripView?.visibility == View.VISIBLE
+
+    fun updateStripVisibility(settingsValues: SettingsValues = Settings.getValues()) {
+        if (isGifPickerShowing) {
+            mStripContainer?.visibility = View.GONE
+            return
+        }
+        if (isShowingStyleStrip) {
+            mStripContainer?.visibility = View.VISIBLE
+            return
+        }
+        if (isShowingClipboardHistory || isShowingEmojiPalettes) {
+            mStripContainer?.visibility = getSecondaryStripVisibility()
+            return
+        }
+        if (PointerTracker.sPersistentTouchpadModeActive && settingsValues.mTouchpadFullscreen) {
+            mStripContainer?.visibility = View.GONE
+            return
+        }
+        mStripContainer?.visibility = if (settingsValues.mToolbarMode == ToolbarMode.HIDDEN) View.GONE else View.VISIBLE
+    }
+
+    fun deallocateMemory() {
+        mKeyboardView?.let {
+            it.cancelAllOngoingEvents()
+            it.deallocateMemory()
+        }
+        if (!isShowingEmojiPalettes) {
+            mEmojiPalettesView?.stopEmojiPalettes()
+        }
+        if (!isShowingClipboardHistory) {
+            mClipboardHistoryView?.stopClipboardHistory(force = false)
+        }
+        mOcrCameraView?.release()
+    }
+
+    fun trimMemory() {
+        mEmojiPalettesView?.clearKeyboardCache()
+        if (!isShowingClipboardHistory) {
+            mClipboardHistoryView?.stopClipboardHistory(force = false)
+        }
+        PointerTracker.clearOldViewData()
+        KeyboardLayoutSet.onSystemLocaleChanged()
+    }
+
+    @SuppressLint("InflateParams")
+    fun onCreateInputView(displayContext: Context, isHardwareAcceleratedDrawingEnabled: Boolean): View {
+        mCurrentInputView?.removeAllViews()
+        mKeyboardView?.closing()
+        PointerTracker.clearOldViewData()
+        val prefs = displayContext.prefs()
+        if (mSuggestionStripView != null) prefs.unregisterOnSharedPreferenceChangeListener(mSuggestionStripView)
+        if (mClipboardHistoryView != null) prefs.unregisterOnSharedPreferenceChangeListener(mClipboardHistoryView)
+        if (mThemeNeedsReload) {
+            Settings.getInstance().loadSettings(
+                displayContext, Settings.getValues().mLocale,
+                Settings.getValues().mInputAttributes, Settings.getValues().mCurrentKeyboardScript
+            )
+        }
+
+        updateKeyboardThemeAndContextThemeWrapper(displayContext, KeyboardTheme.getKeyboardTheme(displayContext))
+        val inputView = LayoutInflater.from(mThemeContext).inflate(R.layout.input_view, null) as InputView
+        mCurrentInputView = inputView
+        mMainKeyboardFrame = inputView.findViewById(R.id.main_keyboard_frame)
+        mEmojiPalettesView = inputView.findViewById(R.id.emoji_palettes_view)
+        mClipboardHistoryView = inputView.findViewById(R.id.clipboard_history_view)
+        mHandwritingView = inputView.findViewById(R.id.handwriting_view)
+        mOcrCameraView = inputView.findViewById(R.id.ocr_camera_view)
+        mOcrResultView = inputView.findViewById(R.id.ocr_result_view)
+        mGifPickerView = inputView.findViewById(R.id.gif_picker_view)
+        mFakeToastView = inputView.findViewById(R.id.fakeToast)
+
+        mOcrCameraView?.setListener(object : OcrCameraView.OcrViewListener {
+            override fun onOcrTextExtracted(lines: List<String>) {
+                showOcrResult(lines)
+            }
+
+            override fun onCloseOcr() {
+                hideOcrPanels()
+            }
+        })
+
+        mOcrResultView?.setListener(object : OcrResultView.OcrResultListener {
+            override fun onInsertText(text: String) {
+                mLatinIME?.onTextInput(text)
+                hideOcrPanels()
+            }
+
+            override fun onRetake() {
+                showOcrCamera()
+            }
+
+            override fun onClose() {
+                hideOcrPanels()
+            }
+        })
+
+        mKeyboardViewWrapper = inputView.findViewById(R.id.keyboard_view_wrapper)
+        mKeyboardViewWrapper?.keyboardActionListener = mLatinIME?.mKeyboardActionListener
+        val keyboardView = inputView.findViewById<MainKeyboardView>(R.id.keyboard_view)
+        mKeyboardView = keyboardView
+        keyboardView.setHardwareAcceleratedDrawingEnabled(isHardwareAcceleratedDrawingEnabled)
+        keyboardView.setKeyboardActionListener(mLatinIME?.mKeyboardActionListener)
+        mEmojiPalettesView?.setHardwareAcceleratedDrawingEnabled(isHardwareAcceleratedDrawingEnabled)
+        mEmojiPalettesView?.setKeyboardActionListener(mLatinIME?.mKeyboardActionListener)
+        mClipboardHistoryView?.setHardwareAcceleratedDrawingEnabled(isHardwareAcceleratedDrawingEnabled)
+        val actionListener = mLatinIME?.mKeyboardActionListener
+        if (actionListener != null) {
+            mClipboardHistoryView?.keyboardActionListener = actionListener
+        }
+        mHandwritingView?.setHardwareAcceleratedDrawingEnabled(isHardwareAcceleratedDrawingEnabled)
+
+        mEmojiTabStripView = inputView.findViewById(R.id.emoji_tab_strip)
+        mEmojiTabStripScrollView = inputView.findViewById(R.id.emoji_tab_strip_scroll_view)
+        mClipboardStripView = inputView.findViewById(R.id.clipboard_strip)
+        mClipboardStripScrollView = inputView.findViewById(R.id.clipboard_strip_scroll_view)
+        mClipboardEditStripView = inputView.findViewById(R.id.clipboard_edit_strip)
+        mOcrStripView = inputView.findViewById(R.id.ocr_strip)
+        mOcrStripScrollView = inputView.findViewById(R.id.ocr_strip_scroll_view)
+        mSuggestionStripView = inputView.findViewById(R.id.suggestion_strip_view)
+        mCjkCandidateStripView = inputView.findViewById(R.id.cjk_candidate_strip_view)
+        mStylePreviewStripView = inputView.findViewById(R.id.style_preview_strip_view)
+        mStripContainer = inputView.findViewById(R.id.strip_container)
+
+        prefs.registerOnSharedPreferenceChangeListener(mSuggestionStripView)
+        prefs.registerOnSharedPreferenceChangeListener(mClipboardHistoryView)
+        PointerTracker.switchTo(keyboardView)
+
+        val touchpadView = inputView.findViewById<TouchpadView>(R.id.touchpad_view)
+        mTouchpadView = touchpadView
+        if (PointerTracker.sPersistentTouchpadModeActive && touchpadView != null) {
+            val listener = mLatinIME?.mKeyboardActionListener
+            if (listener is KeyboardActionListenerImpl) {
+                listener.setupTouchpadListener(touchpadView)
+            }
+        }
+
+        keyboardView.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            val touchpad = mTouchpadView
+            if (touchpad != null && touchpad.visibility == View.VISIBLE) {
+                touchpad.setPadding(
+                    keyboardView.paddingLeft,
+                    keyboardView.paddingTop,
+                    keyboardView.paddingRight,
+                    keyboardView.paddingBottom
+                )
+            }
+        }
+
+        return inputView
+    }
+
+    val floatingKeyboardManager: FloatingKeyboardManager? get() = mLatinIME?.floatingKeyboardManager
+
+    val keyboardShiftMode: Int
+        get() {
+            val kb = keyboard ?: return WordComposer.CAPS_MODE_OFF
+            return kb.mId.keyboardCapsMode
+        }
+
+    val currentKeyboardScript: String
+        get() = mKeyboardLayoutSet?.getScript() ?: ScriptUtils.SCRIPT_UNKNOWN
+
+    fun switchToSubtype(subtype: InputMethodSubtype?) {
+        if (subtype != null) {
+            mLatinIME?.switchToSubtype(subtype)
+        }
+    }
+
+    val localeAndConfidenceInfo: String?
+        get() = mLatinIME?.localeAndConfidenceInfo
+
+    fun setThemeNeedsReload() {
+        mThemeNeedsReload = true
+        val latinIme = mLatinIME ?: return
+        if (!latinIme.isInputViewShown) return
+
+        updateKeyboardTheme(mKeyboardView?.context ?: latinIme)
+        latinIme.hideWindow()
+        try {
+            latinIme.showWindow(true)
+        } catch (_: IllegalStateException) {
+        }
+    }
+
+    companion object {
+        private val TAG = KeyboardSwitcher::class.java.simpleName
+        private const val DEBUG_ACTION = false
+        private const val DEBUG_TIMER_ACTION = false
+
+        @SuppressLint("StaticFieldLeak")
+        private val sInstance = KeyboardSwitcher()
+
+        fun getInstance(): KeyboardSwitcher = sInstance
+
+        fun init(latinIme: LatinIME) {
+            sInstance.initInternal(latinIme)
+        }
+
+        private fun getSecondaryStripVisibility(): Int {
+            return if (Settings.getValues().mSecondaryStripVisible) View.VISIBLE else View.GONE
+        }
+    }
+}

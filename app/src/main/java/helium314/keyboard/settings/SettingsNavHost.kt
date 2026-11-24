@@ -1,0 +1,302 @@
+// SPDX-License-Identifier: GPL-3.0-only
+package helium314.keyboard.settings
+
+import androidx.lifecycle.repeatOnLifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import helium314.keyboard.latin.common.LocaleUtils.constructLocale
+import helium314.keyboard.latin.settings.SettingsSubtype.Companion.toSettingsSubtype
+import helium314.keyboard.latin.settings.getTransitionAnimationScale
+import helium314.keyboard.latin.utils.getActivity
+import helium314.keyboard.latin.utils.prefs
+import helium314.keyboard.settings.screens.AIIntegrationScreen
+import helium314.keyboard.settings.screens.AboutScreen
+import helium314.keyboard.settings.screens.AdvancedSettingsScreen
+import helium314.keyboard.settings.screens.AppearanceScreen
+import helium314.keyboard.settings.screens.ColorsScreen
+import helium314.keyboard.settings.screens.DebugScreen
+import helium314.keyboard.settings.screens.CustomAIKeysScreen
+import helium314.keyboard.settings.screens.TextExpanderScreen
+import helium314.keyboard.settings.screens.DictionaryScreen
+import helium314.keyboard.settings.screens.LibrariesHubScreen
+import helium314.keyboard.settings.screens.GestureTypingScreen
+import helium314.keyboard.settings.screens.LanguageScreen
+import helium314.keyboard.settings.screens.MainSettingsScreen
+import helium314.keyboard.settings.screens.PersonalDictionariesScreen
+import helium314.keyboard.settings.screens.PersonalDictionaryScreen
+import helium314.keyboard.settings.screens.BlockedWordsScreen
+import helium314.keyboard.settings.screens.PreferencesScreen
+import helium314.keyboard.settings.screens.SecondaryLayoutScreen
+import helium314.keyboard.settings.screens.SoundSettingsScreen
+import helium314.keyboard.settings.screens.SubtypeScreen
+import helium314.keyboard.settings.screens.SuggestionsScreen
+import helium314.keyboard.settings.screens.TextCorrectionScreen
+import helium314.keyboard.settings.screens.ToolbarScreen
+import helium314.keyboard.settings.screens.UpdatesScreen
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.receiveAsFlow
+
+@Composable
+fun SettingsNavHost(
+    onClickBack: () -> Unit,
+    startDestination: String? = null,
+) {
+    val navController = rememberNavController()
+    val dir = if (LocalLayoutDirection.current == LayoutDirection.Ltr) 1 else -1
+
+    // only the visible settings activity takes navigation events: with several instances open (e.g. settings opened
+    // again from the keyboard), a hidden one would otherwise receive the event and nothing happens on screen
+    val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(navController, lifecycleOwner) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            SettingsDestination.navEvents.collect { route ->
+                navController.navigate(route)
+            }
+        }
+    }
+
+    // fine-tune sections start closed on every page opened from the main page (and on a fresh settings start);
+    // moving between a page and its sub-pages keeps them as the user left them
+    val ctx = LocalContext.current
+    var collapsedAtStart by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(navController) {
+        navController.currentBackStackEntryFlow.collect { entry ->
+            if (collapsedAtStart && entry.destination.route != SettingsDestination.Settings) return@collect
+            collapsedAtStart = true
+            collapseFineTuneSections(ctx.prefs())
+            (ctx.getActivity() as? SettingsActivity)?.prefChanged()
+        }
+    }
+
+    // duration does not change when system setting changes, but that's rare enough to not care
+    val duration = (250 * getTransitionAnimationScale(LocalContext.current)).toInt()
+    val animation = tween<IntOffset>(durationMillis = duration)
+
+    fun goBack() {
+        if (!navController.popBackStack()) onClickBack()
+    }
+
+    // the search results open the screen of a setting with it, see SettingsJump
+    CompositionLocalProvider(LocalSettingsNavController provides navController) {
+    NavHost(
+        navController = navController,
+        startDestination = startDestination ?: SettingsDestination.Settings,
+        enterTransition = { slideInHorizontally(initialOffsetX = { +it * dir }, animationSpec = animation) },
+        exitTransition = { slideOutHorizontally(targetOffsetX = { -it * dir }, animationSpec = animation) },
+        popEnterTransition = { slideInHorizontally(initialOffsetX = { -it * dir }, animationSpec = animation) },
+        popExitTransition = { slideOutHorizontally(targetOffsetX = { +it * dir }, animationSpec = animation) }
+    ) {
+        composable(SettingsDestination.Settings) {
+            MainSettingsScreen(
+                onClickUpdates = { navController.navigate(SettingsDestination.Updates) },
+                onClickAbout = { navController.navigate(SettingsDestination.About) },
+                onClickTextCorrection = { navController.navigate(SettingsDestination.TextCorrection) },
+                onClickSuggestions = { navController.navigate(SettingsDestination.Suggestions) },
+                onClickPreferences = { navController.navigate(SettingsDestination.Preferences) },
+                onClickToolbar = { navController.navigate(SettingsDestination.Toolbar) },
+                onClickGestureTyping = { navController.navigate(SettingsDestination.GestureTyping) },
+                onClickLibraries = { navController.navigate(SettingsDestination.Libraries) },
+                onClickAdvanced = { navController.navigate(SettingsDestination.Advanced) },
+                onClickAppearance = { navController.navigate(SettingsDestination.Appearance) },
+                onClickLanguage = { navController.navigate(SettingsDestination.Languages) },
+                onClickAIIntegration = { navController.navigate(SettingsDestination.AIIntegration) },
+                onClickBack = ::goBack,
+            )
+        }
+        composable(SettingsDestination.Updates) {
+            UpdatesScreen(onClickBack = ::goBack)
+        }
+        composable(SettingsDestination.About) {
+            AboutScreen(onClickBack = ::goBack)
+        }
+        composable(SettingsDestination.TextCorrection) {
+            TextCorrectionScreen(onClickBack = ::goBack)
+        }
+        composable(SettingsDestination.Suggestions) {
+            SuggestionsScreen(onClickBack = ::goBack)
+        }
+        composable(SettingsDestination.Preferences) {
+            PreferencesScreen(onClickBack = ::goBack)
+        }
+        composable(SettingsDestination.Toolbar) {
+            ToolbarScreen(onClickBack = ::goBack)
+        }
+        composable(SettingsDestination.GestureTyping) {
+            GestureTypingScreen(onClickBack = ::goBack)
+        }
+        composable(SettingsDestination.Advanced) {
+            AdvancedSettingsScreen(onClickBack = ::goBack)
+        }
+        composable(SettingsDestination.AIIntegration) {
+            AIIntegrationScreen(onClickBack = ::goBack)
+        }
+        composable(SettingsDestination.Libraries) {
+            LibrariesHubScreen(
+                onClickBack = ::goBack,
+                onClickOfflineVoice = { navController.navigate(SettingsDestination.OfflineVoice) },
+                onClickTranslation = { navController.navigate(SettingsDestination.Translation) },
+                onClickHandwriting = { navController.navigate(SettingsDestination.Handwriting) },
+                onClickOcr = { navController.navigate(SettingsDestination.OCR) },
+                onClickAIIntegration = { navController.navigate(SettingsDestination.AIIntegration) },
+                onClickSound = { navController.navigate(SettingsDestination.Sound) },
+                onClickCjk = { navController.navigate(SettingsDestination.Cjk) },
+            )
+        }
+        composable(SettingsDestination.Sound) {
+            SoundSettingsScreen(onClickBack = ::goBack)
+        }
+        composable(SettingsDestination.OCR) {
+            helium314.keyboard.settings.screens.OcrSettingsScreen(onClickBack = ::goBack)
+        }
+        composable(SettingsDestination.CustomAIKeys) {
+            CustomAIKeysScreen(
+                onClickBack = ::goBack,
+                onNavigateToConfig = { index -> 
+                    navController.navigate(SettingsDestination.CustomAIKeyConfig + index) 
+                }
+            )
+        }
+        composable(SettingsDestination.CustomAIKeyConfig + "{index}") {
+            val index = it.arguments?.getString("index")?.toIntOrNull() ?: 1
+            helium314.keyboard.settings.screens.ConfigCustomAIKeyScreen(
+                index = index,
+                onClickBack = ::goBack
+            )
+        }
+        composable(SettingsDestination.Debug) {
+            DebugScreen(onClickBack = ::goBack)
+        }
+        composable(SettingsDestination.Appearance) {
+            AppearanceScreen(onClickBack = ::goBack)
+        }
+        composable(SettingsDestination.PersonalDictionary + "{locale}") {
+            val locale = it.arguments?.getString("locale")?.takeIf { loc -> loc.isNotBlank() }?.constructLocale()
+            PersonalDictionaryScreen(
+                onClickBack = ::goBack,
+                locale = locale
+            )
+        }
+        composable(SettingsDestination.PersonalDictionaries) {
+            PersonalDictionariesScreen(onClickBack = ::goBack)
+        }
+        composable(SettingsDestination.BlockedWords) {
+            BlockedWordsScreen(onClickBack = ::goBack)
+        }
+        composable(SettingsDestination.Languages) {
+            LanguageScreen(onClickBack = ::goBack)
+        }
+        composable(SettingsDestination.LanguagesList) {
+            helium314.keyboard.settings.screens.LanguagesListScreen(onClickBack = ::goBack)
+        }
+        composable(SettingsDestination.Dictionaries) {
+            DictionaryScreen(onClickBack = ::goBack)
+        }
+        composable(SettingsDestination.Layouts) {
+            SecondaryLayoutScreen(onClickBack = ::goBack)
+        }
+        composable(SettingsDestination.Colors + "{theme}") {
+            ColorsScreen(isNight = false, theme = it.arguments?.getString("theme"), onClickBack = ::goBack)
+        }
+        composable(SettingsDestination.ColorsNight + "{theme}") {
+            ColorsScreen(isNight = true, theme = it.arguments?.getString("theme"), onClickBack = ::goBack)
+        }
+        composable(SettingsDestination.Subtype + "{subtype}") {
+            val subtypeArg = it.arguments?.getString("subtype") ?: ""
+            SubtypeScreen(initialSubtype = subtypeArg.toSettingsSubtype(), onClickBack = ::goBack)
+        }
+        composable(SettingsDestination.TextExpander) {
+            TextExpanderScreen(onClickBack = ::goBack)
+        }
+        composable(SettingsDestination.BackgroundServices) {
+            helium314.keyboard.settings.screens.BackgroundServicesScreen(onClickBack = ::goBack)
+        }
+        composable(SettingsDestination.OfflineVoice) {
+            helium314.keyboard.latin.voice.VoiceSettingsScreen(
+                onClickBack = ::goBack,
+                onClickAIIntegration = { navController.navigate(SettingsDestination.AIIntegration) }
+            )
+        }
+        composable(SettingsDestination.Translation) {
+            helium314.keyboard.settings.screens.TranslationSettingsScreen(onClickBack = ::goBack)
+        }
+        composable(SettingsDestination.Handwriting) {
+            helium314.keyboard.settings.screens.HandwritingSettingsScreen(onClickBack = ::goBack)
+        }
+        composable(SettingsDestination.AppQuirks) {
+            helium314.keyboard.settings.screens.AppQuirksScreen(onClickBack = ::goBack)
+        }
+        composable(SettingsDestination.Storage) {
+            helium314.keyboard.settings.screens.StorageScreen(onClickBack = ::goBack)
+        }
+        composable(SettingsDestination.Gif) {
+            helium314.keyboard.settings.screens.GifSettingsScreen(onClickBack = ::goBack)
+        }
+        composable(SettingsDestination.Cjk) {
+            helium314.keyboard.settings.screens.CjkSettingsScreen(onClickBack = ::goBack)
+        }
+    }
+    }
+}
+
+object SettingsDestination {
+    const val Settings = "settings"
+    const val Storage = "storage"
+    const val Updates = "updates"
+    const val About = "about"
+    const val TextCorrection = "text_correction"
+    const val Suggestions = "suggestions"
+    const val Preferences = "preferences"
+    const val Toolbar = "toolbar"
+    const val GestureTyping = "gesture_typing"
+    const val Advanced = "advanced"
+    const val Libraries = "libraries_hub"
+    const val AIIntegration = "ai_integration"
+    const val Debug = "debug"
+    const val Appearance = "appearance"
+    const val Colors = "colors/"
+    const val ColorsNight = "colors_night/"
+    const val PersonalDictionaries = "personal_dictionaries"
+    const val PersonalDictionary = "personal_dictionary/"
+    const val BlockedWords = "blocked_words"
+    const val Languages = "languages"
+    const val LanguagesList = "languages_list"
+    const val Subtype = "subtype/"
+    const val Layouts = "layouts"
+    const val Dictionaries = "dictionaries"
+    const val CustomAIKeys = "custom_ai_keys"
+    const val CustomAIKeyConfig = "custom_ai_key_config/"
+    const val TextExpander = "text_expander"
+    const val BackgroundServices = "background_services"
+    const val OfflineVoice = "offline_voice"
+    const val Translation = "translation"
+    const val Handwriting = "handwriting"
+    const val OCR = "ocr"
+    const val Sound = "sound"
+    const val AppQuirks = "app_quirks"
+    const val Gif = "gif"
+    const val Cjk = "cjk"
+
+    private val navChannel = Channel<String>(Channel.BUFFERED)
+    val navEvents = navChannel.receiveAsFlow()
+
+    fun navigateTo(target: String) {
+        navChannel.trySend(target)
+    }
+}

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    SPDX-License-Identifier: GPL-3.0-only
+-->
+<resources>
+    <dimen name="gif_thumb_height">72dp</dimen>
+    <dimen name="gif_picker_header_height">36dp</dimen>
+</resources>

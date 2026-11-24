@@ -1,0 +1,6 @@
+- Added Unicode Font Stylizer (26+ styles) and topic symbol palette (#776).
+- Added Text Expander image shortcuts, suggestion mode, and full editor (#784).
+- Fixed auto-caps race on fast typing (#598) and enabled single-line auto-correct.
+- Eliminated idle battery drain and added 10m/unlimited voice dictation.
+- Preserved uppercase in Pinyin (#787) and added Arabic period diacritics (#786).
+- Fixed foldable split detection (#778) and multi-row popup touch hitboxes.
